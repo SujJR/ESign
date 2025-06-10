@@ -3,9 +3,10 @@ const Log = require('../models/log.model');
 const { ApiError, formatResponse } = require('../utils/apiUtils');
 const logger = require('../utils/logger');
 const documentUtils = require('../utils/documentUtils');
-const { createAdobeSignClient, getAccessToken } = require('../config/adobeSign');
+const { createAdobeSignClient, getAccessToken, uploadTransientDocument } = require('../config/adobeSign');
 const fs = require('fs');
 const path = require('path');
+const { createAgreementWithBestApproach } = require('../utils/adobeSignFormFields');
 
 /**
  * Upload a document for e-signature
@@ -112,7 +113,7 @@ exports.getDocument = async (req, res, next) => {
  */
 exports.prepareForSignature = async (req, res, next) => {
   try {
-    const { recipients } = req.body;
+    const { recipients, useIntelligentPositioning = true } = req.body;
     
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
       return next(new ApiError(400, 'Recipients are required'));
@@ -141,9 +142,10 @@ exports.prepareForSignature = async (req, res, next) => {
       };
     });
     
-    // Update document with recipients
+    // Update document with recipients and intelligent positioning flag
     document.recipients = formattedRecipients;
     document.status = 'ready_for_signature';
+    document.useIntelligentPositioning = useIntelligentPositioning;
     await document.save();
     
     // Log document preparation
@@ -173,10 +175,122 @@ exports.prepareForSignature = async (req, res, next) => {
 };
 
 /**
- * Send document for e-signature
+ * Send document for e-signature using the best approach
  * @route POST /api/documents/:id/send
  */
 exports.sendForSignature = async (req, res, next) => {
+  try {
+    const document = await Document.findOne({
+      _id: req.params.id,
+      creator: req.user._id,
+      status: 'ready_for_signature'
+    });
+    
+    if (!document) {
+      return next(new ApiError(404, 'Document not found or not ready for signature'));
+    }
+
+    if (!document.recipients || document.recipients.length === 0) {
+      return next(new ApiError(400, 'Document has no recipients'));
+    }
+
+    try {
+      // Check if file exists
+      if (!fs.existsSync(document.filePath)) {
+        logger.error(`File not found at path: ${document.filePath}`);
+        return next(new ApiError(404, 'Document file not found on server'));
+      }
+      
+      // Get file stats to ensure it's not empty
+      const fileStats = fs.statSync(document.filePath);
+      if (fileStats.size === 0) {
+        logger.error(`File is empty: ${document.filePath}`);
+        return next(new ApiError(400, 'Document file is empty'));
+      }
+      
+      // Upload as transient document
+      logger.info(`Uploading document as transient document: ${document.originalName}`);
+      const transientDocumentId = await uploadTransientDocument(document.filePath);
+      logger.info(`Document uploaded as transient document: ${transientDocumentId}`);
+      
+      // Use the comprehensive approach from adobeSignFormFields utility
+      logger.info(`Using comprehensive approach to create agreement: ${document.originalName}`);
+      const result = await createAgreementWithBestApproach(
+        transientDocumentId,
+        document.recipients,
+        document.originalName,
+        {
+          templateId: document.templateId // If using templates
+        }
+      );
+      
+      // Update document with Adobe Sign agreement ID
+      document.adobeAgreementId = result.agreementId;
+      document.status = 'sent_for_signature';
+      document.adobeMetadata = {
+        agreementId: result.agreementId,
+        method: result.method,
+        createdAt: new Date()
+      };
+      
+      // Update recipients status
+      document.recipients.forEach(recipient => {
+        recipient.status = 'sent';
+      });
+      
+      await document.save();
+      
+      // Log document sent for signature
+      await Log.create({
+        level: 'info',
+        message: `Document sent for signature using ${result.method} approach: ${document.originalName}`,
+        userId: req.user._id,
+        documentId: document._id,
+        ipAddress: req.ip,
+        requestPath: req.originalUrl,
+        requestMethod: req.method,
+        metadata: {
+          adobeAgreementId: result.agreementId,
+          method: result.method,
+          recipientCount: document.recipients.length
+        }
+      });
+      
+      logger.info(`Document sent for signature using ${result.method} approach: ${document.originalName} by user ${req.user.email}`);
+      
+      res.status(200).json(formatResponse(
+        200,
+        `Document sent for signature successfully using ${result.method} approach`,
+        { 
+          document,
+          adobeAgreementId: result.agreementId,
+          method: result.method
+        }
+      ));
+    } catch (adobeError) {
+      logger.error(`Adobe Sign API Error: ${adobeError.message}`);
+      if (adobeError.response) {
+        logger.error(`Status: ${adobeError.response.status}, Data: ${JSON.stringify(adobeError.response.data)}`);
+      }
+      
+      // Update document status to indicate error
+      document.status = 'signature_error';
+      document.errorMessage = adobeError.message;
+      await document.save();
+      
+      return next(new ApiError(500, `Failed to send document for signature: ${adobeError.message}`));
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Send document for e-signature using a two-step approach
+ * First create the agreement, then add form fields
+ * @route POST /api/documents/:id/send-two-step
+ */
+exports.sendForSignatureTwoStep = async (req, res, next) => {
   try {
     const document = await Document.findOne({
       _id: req.params.id,
@@ -193,15 +307,26 @@ exports.sendForSignature = async (req, res, next) => {
     }
     
     try {
-      // Get Adobe Sign access token
-      const accessToken = await getAccessToken();
+      // Get Adobe Sign client
+      const adobeSignClient = await createAdobeSignClient();
       
-      // Create Adobe Sign client
-      const adobeSignClient = createAdobeSignClient(accessToken);
+      // Check file existence
+      if (!fs.existsSync(document.filePath)) {
+        logger.error(`File not found at path: ${document.filePath}`);
+        return next(new ApiError(404, 'Document file not found on server'));
+      }
       
-      // Read file as base64
-      const fileBuffer = fs.readFileSync(document.filePath);
-      const fileBase64 = fileBuffer.toString('base64');
+      // Get file stats to ensure it's not empty
+      const fileStats = fs.statSync(document.filePath);
+      if (fileStats.size === 0) {
+        logger.error(`File is empty: ${document.filePath}`);
+        return next(new ApiError(400, 'Document file is empty'));
+      }
+      
+      // Upload as transient document
+      logger.info(`Uploading document as transient document: ${document.originalName}`);
+      const transientDocumentId = await uploadTransientDocument(document.filePath);
+      logger.info(`Document uploaded as transient document: ${transientDocumentId}`);
       
       // Prepare recipients in Adobe Sign format
       const adobeRecipients = document.recipients.map(recipient => ({
@@ -209,12 +334,13 @@ exports.sendForSignature = async (req, res, next) => {
         role: 'SIGNER'
       }));
       
-      // Create Adobe Sign agreement
-      const agreementResponse = await adobeSignClient.post('/api/rest/v6/agreements', {
+      // STEP 1: Create agreement WITHOUT form fields
+      logger.info(`Creating agreement without form fields: ${document.originalName}`);
+      
+      const payload = {
         fileInfos: [
           {
-            documentBase64: fileBase64,
-            name: document.originalName
+            transientDocumentId: transientDocumentId
           }
         ],
         name: document.originalName,
@@ -227,12 +353,66 @@ exports.sendForSignature = async (req, res, next) => {
         ],
         signatureType: 'ESIGN',
         state: 'IN_PROCESS'
-      });
+      };
+      
+      // Log request headers and payload for debugging
+      logger.info(`Adobe Sign API Headers: ${JSON.stringify(adobeSignClient.defaults.headers)}`);
+      logger.info(`Adobe Sign API URL: ${adobeSignClient.defaults.baseURL}`);
+      logger.info(`Request payload: ${JSON.stringify(payload)}`);
+      
+      // Create agreement
+      const agreementResponse = await adobeSignClient.post('api/rest/v6/agreements', payload);
+      logger.info(`Agreement created with ID: ${agreementResponse.data.id}`);
       
       // Update document with Adobe Sign agreement ID
       document.adobeAgreementId = agreementResponse.data.id;
       document.status = 'sent_for_signature';
       document.adobeMetadata = agreementResponse.data;
+      
+      // STEP 2: Add form fields to the agreement
+      try {
+        // Use the enhanced formFieldUtils with retry logic
+        const { addFormFieldsWithRetry, generateIntelligentFormFields } = require('../utils/formFieldUtils');
+        
+        // Add form fields with retry logic
+        logger.info(`Adding form fields to agreement ${document.adobeAgreementId} with retry logic...`);
+        
+        // Use intelligent form field positioning based on document properties
+        if (document.useIntelligentPositioning) {
+          // Generate intelligent form fields
+          const formFields = generateIntelligentFormFields(document);
+          
+          // Add the intelligent form fields to the agreement
+          const formFieldsResponse = await addFormFieldsWithRetry(
+            document.adobeAgreementId,
+            document.recipients,
+            document.pageCount || 1,
+            3,  // maxRetries
+            5000, // initialDelay
+            3000  // retryDelay
+          );
+          
+          logger.info(`Intelligent form fields added to agreement: ${JSON.stringify(formFieldsResponse)}`);
+        } else {
+          // Use standard form fields with retry logic
+          const formFieldsResponse = await addFormFieldsWithRetry(
+            document.adobeAgreementId,
+            document.recipients,
+            document.pageCount || 1,
+            3,  // maxRetries
+            5000, // initialDelay
+            3000  // retryDelay
+          );
+          
+          logger.info(`Form fields added to agreement: ${JSON.stringify(formFieldsResponse)}`);
+        }
+      } catch (formFieldError) {
+        // Log error but continue since the agreement was created successfully
+        logger.error(`Error adding form fields: ${formFieldError.message}`);
+        if (formFieldError.response) {
+          logger.error(`Status: ${formFieldError.response.status}, Data: ${JSON.stringify(formFieldError.response.data)}`);
+        }
+      }
       
       // Update recipients status
       document.recipients.forEach(recipient => {
@@ -244,7 +424,7 @@ exports.sendForSignature = async (req, res, next) => {
       // Log document sent for signature
       await Log.create({
         level: 'info',
-        message: `Document sent for signature: ${document.originalName}`,
+        message: `Document sent for signature (two-step): ${document.originalName}`,
         userId: req.user._id,
         documentId: document._id,
         ipAddress: req.ip,
@@ -255,22 +435,152 @@ exports.sendForSignature = async (req, res, next) => {
         }
       });
       
-      logger.info(`Document sent for signature: ${document.originalName} by user ${req.user.email}`);
+      logger.info(`Document sent for signature (two-step): ${document.originalName} by user ${req.user.email}`);
       
       res.status(200).json(formatResponse(
         200,
         'Document sent for signature successfully',
         { document }
       ));
-    } catch (error) {
-      // Handle Adobe Sign API errors
-      logger.error(`Error sending document for signature: ${error.message}`);
+    } catch (apiError) {
+      // Detailed error handling for Adobe Sign API errors
+      logger.error(`Adobe Sign API Error: ${apiError.message}`);
+      let errorMessage = 'Error sending document for signature';
+      
+      if (apiError.response) {
+        logger.error(`Status: ${apiError.response.status}, Data: ${JSON.stringify(apiError.response.data)}`);
+        
+        // Parse specific error codes
+        if (apiError.response.data && apiError.response.data.code === 'INVALID_API_ACCESS_POINT') {
+          errorMessage = 'Adobe Sign API access point is invalid. Please run the test-adobe-sign-access-points.js script to get the correct access point.';
+        } else if (apiError.response.status === 401) {
+          errorMessage = 'Authentication failed with Adobe Sign API. Please check your credentials.';
+        } else if (apiError.response.status === 403) {
+          errorMessage = 'Permission denied accessing Adobe Sign API. Please verify API key permissions.';
+        } else if (apiError.response.status === 400) {
+          errorMessage = `Bad request to Adobe Sign API: ${apiError.response.data.message || 'Invalid request format'}`;
+        } else {
+          errorMessage = `Adobe Sign API error (${apiError.response.status}): ${apiError.response.data.message || apiError.message}`;
+        }
+      }
       
       // Update document status to indicate failure
       document.status = 'failed';
       await document.save();
       
-      return next(new ApiError(500, `Error sending document for signature: ${error.message}`));
+      return next(new ApiError(500, errorMessage));
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Send document for signature using comprehensive approach with multiple fallbacks
+ * @route POST /api/documents/:id/send-comprehensive
+ */
+exports.sendForSignatureComprehensive = async (req, res, next) => {
+  try {
+    const document = await Document.findOne({
+      _id: req.params.id,
+      creator: req.user._id,
+      status: 'ready_for_signature'
+    });
+    
+    if (!document) {
+      return next(new ApiError(404, 'Document not found or not ready for signature'));
+    }
+    
+    if (!document.recipients || document.recipients.length === 0) {
+      return next(new ApiError(400, 'Document has no recipients'));
+    }
+    
+    try {
+      // Check file existence
+      if (!fs.existsSync(document.filePath)) {
+        logger.error(`File not found at path: ${document.filePath}`);
+        return next(new ApiError(404, 'Document file not found on server'));
+      }
+      
+      // Get file stats to ensure it's not empty
+      const fileStats = fs.statSync(document.filePath);
+      if (fileStats.size === 0) {
+        logger.error(`File is empty: ${document.filePath}`);
+        return next(new ApiError(400, 'Document file is empty'));
+      }
+      
+      // Upload as transient document
+      logger.info(`Uploading document as transient document: ${document.originalName}`);
+      const transientDocumentId = await uploadTransientDocument(document.filePath);
+      logger.info(`Document uploaded as transient document: ${transientDocumentId}`);
+      
+      // Use comprehensive approach with multiple fallbacks
+      logger.info(`Using comprehensive approach for document: ${document.originalName}`);
+      
+      const result = await createAgreementWithBestApproach(
+        transientDocumentId,
+        document.recipients,
+        document.originalName,
+        {
+          templateId: document.templateId // If using templates
+        }
+      );
+      
+      // Update document with Adobe Sign agreement ID
+      document.adobeAgreementId = result.agreementId;
+      document.status = 'sent_for_signature';
+      document.adobeMetadata = {
+        agreementId: result.agreementId,
+        method: result.method,
+        createdAt: new Date()
+      };
+      
+      // Update recipients status
+      document.recipients.forEach(recipient => {
+        recipient.status = 'sent';
+      });
+      
+      await document.save();
+      
+      // Log document sent for signature
+      await Log.create({
+        level: 'info',
+        message: `Document sent for signature using ${result.method} approach: ${document.originalName}`,
+        userId: req.user._id,
+        documentId: document._id,
+        ipAddress: req.ip,
+        requestPath: req.originalUrl,
+        requestMethod: req.method,
+        metadata: {
+          adobeAgreementId: result.agreementId,
+          method: result.method,
+          recipientCount: document.recipients.length
+        }
+      });
+      
+      logger.info(`Document sent for signature using ${result.method} approach: ${document.originalName} by user ${req.user.email}`);
+      
+      res.status(200).json(formatResponse(
+        200,
+        `Document sent for signature successfully using ${result.method} approach`,
+        { 
+          document,
+          adobeAgreementId: result.agreementId,
+          method: result.method
+        }
+      ));
+    } catch (adobeError) {
+      logger.error(`Adobe Sign API Error: ${adobeError.message}`);
+      if (adobeError.response) {
+        logger.error(`Status: ${adobeError.response.status}, Data: ${JSON.stringify(adobeError.response.data)}`);
+      }
+      
+      // Update document status to indicate error
+      document.status = 'signature_error';
+      document.errorMessage = adobeError.message;
+      await document.save();
+      
+      return next(new ApiError(500, `Failed to send document for signature: ${adobeError.message}`));
     }
   } catch (error) {
     next(error);
@@ -297,14 +607,11 @@ exports.checkDocumentStatus = async (req, res, next) => {
     }
     
     try {
-      // Get Adobe Sign access token
-      const accessToken = await getAccessToken();
-      
-      // Create Adobe Sign client
-      const adobeSignClient = createAdobeSignClient(accessToken);
+      // Get Adobe Sign client (async)
+      const adobeSignClient = await createAdobeSignClient();
       
       // Get agreement status
-      const agreementResponse = await adobeSignClient.get(`/api/rest/v6/agreements/${document.adobeAgreementId}`);
+      const agreementResponse = await adobeSignClient.get(`api/rest/v6/agreements/${document.adobeAgreementId}`);
       
       // Update document metadata
       document.adobeMetadata = agreementResponse.data;
@@ -411,15 +718,12 @@ exports.downloadDocument = async (req, res, next) => {
     // Check if document has been completed
     if (document.status === 'completed' && document.adobeAgreementId) {
       try {
-        // Get Adobe Sign access token
-        const accessToken = await getAccessToken();
-        
-        // Create Adobe Sign client
-        const adobeSignClient = createAdobeSignClient(accessToken);
+        // Get Adobe Sign client (async)
+        const adobeSignClient = await createAdobeSignClient();
         
         // Get signed document
         const agreementResponse = await adobeSignClient.get(
-          `/api/rest/v6/agreements/${document.adobeAgreementId}/combinedDocument`,
+          `api/rest/v6/agreements/${document.adobeAgreementId}/combinedDocument`,
           { responseType: 'arraybuffer' }
         );
         

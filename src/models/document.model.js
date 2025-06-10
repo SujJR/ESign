@@ -57,6 +57,10 @@ const documentSchema = new mongoose.Schema(
     adobeMetadata: {
       type: mongoose.Schema.Types.Mixed,
       default: {}
+    },
+    useIntelligentPositioning: {
+      type: Boolean,
+      default: true
     }
   },
   {

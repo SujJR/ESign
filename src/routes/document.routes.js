@@ -23,6 +23,12 @@ router.post('/:id/prepare', documentController.prepareForSignature);
 // Send document for signature
 router.post('/:id/send', documentController.sendForSignature);
 
+// Send document for signature using two-step approach
+router.post('/:id/send-two-step', documentController.sendForSignatureTwoStep);
+
+// Send document for signature using comprehensive approach with multiple fallbacks
+router.post('/:id/send-comprehensive', documentController.sendForSignatureComprehensive);
+
 // Check document status
 router.get('/:id/status', documentController.checkDocumentStatus);
 

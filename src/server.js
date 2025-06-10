@@ -52,9 +52,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/logs', logRoutes);
 
-// Handle 404 errors
-app.use('*', (req, res, next) => {
-  next(new ApiError(404, `Can't find ${req.originalUrl} on this server`));
+// Handle 404 errors - use a regular path instead of wildcard
+app.use((req, res, next) => {
+  const url = req.originalUrl || req.url || 'unknown';
+  next(new ApiError(404, `Route not found: ${url}`));
 });
 
 // Error handling middleware
