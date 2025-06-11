@@ -22,12 +22,19 @@ const storage = multer.diskStorage({
   }
 });
 
-// Filter files to only allow PDFs
+// Filter files to allow PDFs, DOCX, and DOC files
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype === 'application/pdf') {
+  const allowedMimeTypes = [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+    'application/msword', // .doc
+    'application/json' // for JSON data files
+  ];
+  
+  if (allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new ApiError(400, 'Only PDF files are allowed'), false);
+    cb(new ApiError(400, 'Only PDF, DOCX, DOC, and JSON files are allowed'), false);
   }
 };
 
@@ -42,6 +49,13 @@ const upload = multer({
 
 // Middleware for single file upload
 exports.uploadDocument = upload.single('document');
+
+// Middleware for document with optional JSON data
+exports.uploadDocumentWithData = upload.fields([
+  { name: 'document', maxCount: 1 },
+  { name: 'documents', maxCount: 1 }, // Support both singular and plural
+  { name: 'data', maxCount: 1 }
+]);
 
 // Middleware for handling multer errors
 exports.handleMulterErrors = (err, req, res, next) => {

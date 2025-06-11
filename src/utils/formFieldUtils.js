@@ -259,7 +259,7 @@ const generateIntelligentFormFields = (document) => {
     
     // Add signature field
     formFields.push({
-      fieldName: `Signature_${index + 1}`,
+      fieldName: recipient.signatureField || `Signature_${index + 1}`,
       displayName: `Signature (${recipient.name})`,
       defaultValue: "",
       fieldType: "SIGNATURE",

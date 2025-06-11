@@ -30,7 +30,7 @@ const documentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['uploaded', 'processing', 'ready_for_signature', 'sent_for_signature', 'completed', 'cancelled', 'expired', 'failed'],
+      enum: ['uploaded', 'processing', 'ready_for_signature', 'sent_for_signature', 'partially_signed', 'completed', 'cancelled', 'expired', 'failed', 'signature_error'],
       default: 'uploaded'
     },
     adobeAgreementId: {
@@ -51,7 +51,11 @@ const documentSchema = new mongoose.Schema(
           enum: ['pending', 'sent', 'viewed', 'signed', 'declined', 'expired'],
           default: 'pending'
         },
-        signedAt: { type: Date, default: null }
+        signedAt: { type: Date, default: null },
+        lastReminderSent: { type: Date, default: null },
+        lastSigningUrlAccessed: { type: Date, default: null },
+        signatureField: { type: String, default: null },
+        title: { type: String, default: null }
       }
     ],
     adobeMetadata: {
@@ -61,6 +65,42 @@ const documentSchema = new mongoose.Schema(
     useIntelligentPositioning: {
       type: Boolean,
       default: true
+    },
+    signatureFieldMapping: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    templateData: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    templateVariables: {
+      type: [String],
+      default: []
+    },
+    processedFilePath: {
+      type: String,
+      default: null
+    },
+    pdfFilePath: {
+      type: String,
+      default: null
+    },
+    documentAnalysis: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+    autoDetectedSignatureFields: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: []
+    },
+    lastReminderSent: {
+      type: Date,
+      default: null
+    },
+    reminderCount: {
+      type: Number,
+      default: 0
     }
   },
   {

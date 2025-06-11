@@ -1,0 +1,460 @@
+{
+  "info": {
+    "name": "E-Signature API - Complete Collection with Enhanced Workflow",
+    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, and iframe-compatible signing URLs.\n\n🆕 NEW FEATURES:\n• Send reminders to unsigned recipients\n• Get signing URLs for iframe embedding\n• Get signing URLs for all recipients at once\n• Auto-extract recipients from JSON template data\n• Map signature fields to specific users\n• Enhanced workflow management\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "authToken", 
+      "value": ""
+    },
+    {
+      "key": "documentId",
+      "value": ""
+    },
+    {
+      "key": "signingUrl",
+      "value": ""
+    },
+    {
+      "key": "recipientEmail",
+      "value": "john.smith@example.com"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    console.log('User registered successfully');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test User\",\n  \"email\": \"test@example.com\",\n  \"password\": \"testpassword123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/register"
+          }
+        },
+        {
+          "name": "Login User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.token) {",
+                  "        pm.collectionVariables.set('authToken', response.data.token);",
+                  "        console.log('Login successful, token saved');",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"testpassword123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Document Management",
+      "item": [
+        {
+          "name": "Upload DOCX with Template Data (JSON File)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.document) {",
+                  "        pm.collectionVariables.set('documentId', response.data.document._id);",
+                  "        console.log('Template processed successfully, ID saved:', response.data.document._id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "document",
+                  "type": "file",
+                  "src": [],
+                  "description": "Upload your DOCX template file (e.g., Test_Service_Agreement_Template.docx)"
+                },
+                {
+                  "key": "data",
+                  "type": "file",
+                  "src": [],
+                  "description": "Upload JSON file with template data and recipient info (e.g., test-template-data.json)"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/documents/upload-with-data"
+          }
+        },
+        {
+          "name": "Get All Documents",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents"
+          }
+        },
+        {
+          "name": "Get Document Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Signature Workflow",
+      "item": [
+        {
+          "name": "Prepare Document for Signature",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipients\": [\n    {\n      \"name\": \"John Smith\",\n      \"email\": \"john.smith@example.com\"\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/prepare"
+          }
+        },
+        {
+          "name": "Send for Signature",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/send"
+          }
+        },
+        {
+          "name": "Check Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/status"
+          }
+        },
+        {
+          "name": "Download Document",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/download"
+          }
+        },
+        {
+          "name": "🆕 Send Reminder to Unsigned Recipients",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.pendingRecipients) {",
+                  "        console.log('Reminder sent to', response.data.pendingRecipients.length, 'pending recipients');",
+                  "        response.data.pendingRecipients.forEach(recipient => {",
+                  "            console.log('- ' + recipient.email + ' (' + recipient.status + ')');",
+                  "        });",
+                  "    }",
+                  "} else {",
+                  "    console.log('Reminder failed:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Please complete your signature for this important document. Your prompt attention is appreciated.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/send-reminder",
+            "description": "Send reminder email to recipients who haven't signed yet. The system automatically identifies pending recipients and sends reminders only to them. Custom message is optional."
+          }
+        },
+        {
+          "name": "🆕 Get Signing URL for iframe Embedding",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.signingUrl) {",
+                  "        console.log('Signing URL retrieved successfully');",
+                  "        console.log('URL preview:', response.data.signingUrl.substring(0, 80) + '...');",
+                  "        console.log('Can embed in iframe:', response.data.embedding.canEmbed);",
+                  "        console.log('URL changes after signing:', response.data.urlBehavior.changesAfterSigning);",
+                  "        console.log('Agreement status:', response.data.agreement.status);",
+                  "        console.log('Recipient status:', response.data.recipient.status);",
+                  "        ",
+                  "        // Save the signing URL to collection variable for further use",
+                  "        pm.collectionVariables.set('signingUrl', response.data.signingUrl);",
+                  "    }",
+                  "} else {",
+                  "    console.log('Failed to get signing URL:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/{{documentId}}/signing-url?recipientEmail=john.smith@example.com",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "documents", "{{documentId}}", "signing-url"],
+              "query": [
+                {
+                  "key": "recipientEmail",
+                  "value": "john.smith@example.com",
+                  "description": "Email of the recipient whose signing URL you want to retrieve. Must match one of the document recipients."
+                }
+              ]
+            },
+            "description": "Get the signing URL for a specific recipient. This URL can be embedded in an iframe for seamless user experience.\n\n⚠️ Important: URLs may change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding."
+          }
+        },
+        {
+          "name": "🆕 Get All Signing URLs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.recipients) {",
+                  "        console.log('All signing URLs retrieved successfully');",
+                  "        console.log('Total recipients:', response.data.totalRecipients);",
+                  "        console.log('Active URLs:', response.data.activeUrls);",
+                  "        console.log('Agreement status:', response.data.agreement.status);",
+                  "        ",
+                  "        response.data.recipients.forEach((recipient, index) => {",
+                  "            console.log(`${index + 1}. ${recipient.recipient.name} (${recipient.recipient.email})`);",
+                  "            console.log(`   Status: ${recipient.status}`);",
+                  "            console.log(`   Can Sign: ${recipient.canSign}`);",
+                  "            console.log(`   Signature Field: ${recipient.recipient.signatureField}`);",
+                  "            if (recipient.signingUrl) {",
+                  "                console.log(`   URL Preview: ${recipient.signingUrl.substring(0, 60)}...`);",
+                  "            }",
+                  "            console.log('');",
+                  "        });",
+                  "    }",
+                  "} else {",
+                  "    console.log('Failed to get signing URLs:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/{{documentId}}/signing-urls",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "documents", "{{documentId}}", "signing-urls"]
+            },
+            "description": "Get signing URLs for all recipients of a document. This endpoint returns an array of all recipients with their respective signing URLs, status, and signature field mappings.\n\n⚠️ Important: URLs may change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding."
+          }
+        },
+        {
+          "name": "🆕 Prepare Document with JSON Recipients (Auto-Mapping)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('Document prepared with auto-extracted JSON recipients successfully');",
+                  "    if (response.data && response.data.document && response.data.document.recipients) {",
+                  "        console.log('Recipients auto-extracted from JSON template data:');",
+                  "        response.data.document.recipients.forEach((recipient, index) => {",
+                  "            console.log(`${index + 1}. ${recipient.name} (${recipient.email})`);",
+                  "            console.log(`   Signature Field: ${recipient.signatureField}`);",
+                  "            console.log(`   Title: ${recipient.title || 'N/A'}`);",
+                  "        });",
+                  "        console.log('');",
+                  "        console.log('Auto-generated signature field mapping:');",
+                  "        if (response.data.document.signatureFieldMapping) {",
+                  "            Object.entries(response.data.document.signatureFieldMapping).forEach(([email, field]) => {",
+                  "                console.log(`   ${email} → ${field}`);",
+                  "            });",
+                  "        }",
+                  "    }",
+                  "} else {",
+                  "    console.log('Failed to prepare document:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"useIntelligentPositioning\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/{{documentId}}/prepare",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "documents", "{{documentId}}", "prepare"]
+            },
+            "description": "🚀 **Enhanced Auto-Extraction**: Automatically extracts recipients from uploaded JSON template data and generates signature field mapping dynamically.\n\n✨ **New Dynamic Features**:\n• Auto-extracts recipients from JSON `recipients` array\n• Auto-generates signature field mapping from recipient emails and signatureField properties\n• Only includes people intended for signatures (ignores project managers, approvers, etc.)\n• No manual mapping required!\n\n📋 **How it works**:\n1. Reads the `recipients` array from your uploaded JSON template data\n2. Extracts only the people meant to sign (not project managers, etc.)\n3. Automatically creates signature field mapping using their emails and signatureField values\n4. Prepares document for signature with intelligent positioning\n\n🎯 **Expected JSON structure**:\n```json\n{\n  \"recipients\": [\n    {\n      \"name\": \"John Smith\",\n      \"email\": \"john.smith@example.com\",\n      \"title\": \"CEO\",\n      \"signatureField\": \"clientSignature\"\n    }\n  ]\n}\n```\n\n⚡ **No manual work needed** - just upload your JSON with recipients and call this endpoint!"
+          }
+        }
+      ]
+    }
+  ]
+}
