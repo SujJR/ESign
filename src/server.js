@@ -14,6 +14,8 @@ const connectDB = require('./config/db');
 // Import routes
 const documentRoutes = require('./routes/document.routes');
 const logRoutes = require('./routes/log.routes');
+const apiKeyRoutes = require('./routes/apiKey.routes');
+const emailRoutes = require('./routes/email.routes');
 
 // Import middleware
 const errorMiddleware = require('./middleware/error');
@@ -41,11 +43,19 @@ app.use(logger.morganMiddleware);
 // Basic route
 app.get('/', (req, res) => {
   res.json({
-    message: 'Welcome to the ESign API - No Authentication Required',
+    message: 'Welcome to the ESign API - API Key Authentication Enabled',
     version: '1.0.0',
+    authentication: 'API Key required',
     endpoints: {
       documents: '/api/documents',
-      logs: '/api/logs'
+      logs: '/api/logs',
+      apiKeys: '/api/auth/api-keys',
+      email: '/api/email'
+    },
+    authInfo: {
+      header: 'X-API-Key: your_api_key',
+      alternative: 'Authorization: Bearer your_api_key',
+      queryParam: '?api_key=your_api_key'
     }
   });
 });
@@ -53,6 +63,8 @@ app.get('/', (req, res) => {
 // API routes
 app.use('/api/documents', documentRoutes);
 app.use('/api/logs', logRoutes);
+app.use('/api/auth/api-keys', apiKeyRoutes);
+app.use('/api/email', emailRoutes);
 
 // Handle 404 errors - use a regular path instead of wildcard
 app.use((req, res, next) => {

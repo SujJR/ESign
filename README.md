@@ -2,7 +2,7 @@
 
 A Node.js REST API for electronic signatures using Adobe Sign API. This application allows users to upload documents, prepare them for e-signatures, send them to recipients, and track the status of signatures.
 
-**🔓 No Authentication Required** - This API runs without JWT authentication for easier development and testing.
+**🔐 API Key Authentication Required** - This API now uses secure API key authentication for all endpoints.
 
 ## 🆕 Enhanced Features
 
@@ -17,7 +17,10 @@ A Node.js REST API for electronic signatures using Adobe Sign API. This applicat
 
 ## Features
 
-- **🔓 No authentication required** - All endpoints are publicly accessible
+- **🔐 API Key Authentication** - Secure access with API key management
+- **📊 Permission-based Access Control** - Granular permissions for different operations
+- **⚡ Rate Limiting** - Configurable rate limits per API key
+- **🌐 IP Restrictions** - Optional IP-based access control
 - Document upload and management with template processing
 - **🆕 Dynamic auto-extraction of recipients from JSON template data**
 - **🆕 Intelligent signature field mapping with auto-generation**
@@ -53,8 +56,50 @@ ADOBE_CLIENT_ID=your_adobe_client_id
 ADOBE_CLIENT_SECRET=your_adobe_client_secret
 ADOBE_API_BASE_URL=https://api.na1.adobesign.com/
 ADOBE_INTEGRATION_KEY=your_adobe_integration_key
-JWT_SECRET=your_jwt_secret_key
-JWT_EXPIRES_IN=1d
+ADOBE_API_USER_EMAIL=your_adobe_sign_email
+```
+
+## API Key Setup
+
+After setting up your environment and database connection, you need to generate API keys:
+
+### Generate Initial API Keys
+```bash
+node generate-api-keys.js
+```
+
+This will create three initial API keys:
+- **Admin API Key** - Full administrative access (`admin:all`)
+- **Document Management Key** - Document operations (`documents:read`, `documents:write`, `documents:send`)
+- **Read-Only Key** - Monitoring access (`documents:read`, `logs:read`)
+
+### API Key Permissions
+
+Available permissions:
+- `documents:read` - View documents and their status
+- `documents:write` - Upload and modify documents
+- `documents:send` - Send documents for signature
+- `documents:delete` - Delete documents
+- `logs:read` - Access system logs
+- `admin:all` - Full administrative access (includes all permissions)
+
+### Using API Keys
+
+Include your API key in requests using one of these methods:
+
+**Method 1: X-API-Key Header (Recommended)**
+```bash
+curl -H "X-API-Key: ak_12345678_your_api_key_here" http://localhost:3000/api/documents
+```
+
+**Method 2: Authorization Header**
+```bash
+curl -H "Authorization: Bearer ak_12345678_your_api_key_here" http://localhost:3000/api/documents
+```
+
+**Method 3: Query Parameter**
+```bash
+curl "http://localhost:3000/api/documents?api_key=ak_12345678_your_api_key_here"
 ```
 
 ## Setup Adobe Sign API
@@ -85,22 +130,33 @@ npm start
 
 ## API Endpoints
 
-### Documents
-- `POST /api/documents/upload` - Upload a document
-- `POST /api/documents/upload-with-data` - Upload document with template data
-- `GET /api/documents` - Get all documents
-- `GET /api/documents/:id` - Get a specific document
-- `POST /api/documents/:id/prepare` - **🆕 ENHANCED** Prepare document with auto-mapping
-- `POST /api/documents/:id/send` - Send document for signature
-- `POST /api/documents/:id/send-reminder` - **NEW** Send reminder to unsigned recipients
-- `GET /api/documents/:id/signing-url` - **NEW** Get signing URL for iframe embedding
-- `GET /api/documents/:id/signing-urls` - **🆕 NEW** Get all signing URLs at once
-- `GET /api/documents/:id/status` - Check document status
-- `GET /api/documents/:id/download` - Download document
+**🔐 All endpoints require API key authentication**
 
-### Logs (Admin only)
-- `GET /api/logs` - Get logs with pagination and filtering
-- `GET /api/logs/summary` - Get logs summary statistics
+### Documents (Requires API Key with appropriate permissions)
+- `POST /api/documents/upload` - Upload a document *(requires `documents:write`)*
+- `POST /api/documents/upload-with-data` - Upload document with template data *(requires `documents:write`)*
+- `GET /api/documents` - Get all documents *(requires `documents:read`)*
+- `GET /api/documents/:id` - Get a specific document *(requires `documents:read`)*
+- `POST /api/documents/:id/prepare` - **🆕 ENHANCED** Prepare document with auto-mapping *(requires `documents:write`)*
+- `POST /api/documents/:id/send` - Send document for signature *(requires `documents:send`)*
+- `POST /api/documents/:id/send-reminder` - **NEW** Send reminder to unsigned recipients *(requires `documents:send`)*
+- `GET /api/documents/:id/signing-url` - **NEW** Get signing URL for iframe embedding *(requires `documents:read`)*
+- `GET /api/documents/:id/signing-urls` - **🆕 NEW** Get all signing URLs at once *(requires `documents:read`)*
+- `GET /api/documents/:id/status` - Check document status *(requires `documents:read`)*
+- `GET /api/documents/:id/download` - Download document *(requires `documents:read`)*
+
+### API Key Management (Requires Admin Access)
+- `POST /api/auth/api-keys` - Create new API key *(requires `admin:all`)*
+- `GET /api/auth/api-keys` - List all API keys *(requires `admin:all`)*
+- `GET /api/auth/api-keys/:keyId` - Get specific API key details *(requires `admin:all`)*
+- `PUT /api/auth/api-keys/:keyId` - Update API key *(requires `admin:all`)*
+- `DELETE /api/auth/api-keys/:keyId` - Deactivate API key *(requires `admin:all`)*
+- `GET /api/auth/api-keys/:keyId/stats` - Get API key usage statistics *(requires `admin:all`)*
+- `POST /api/auth/api-keys/:keyId/regenerate` - Regenerate API key *(requires `admin:all`)*
+
+### Logs (Requires Log Access)
+- `GET /api/logs` - Get logs with pagination and filtering *(requires `logs:read`)*
+- `GET /api/logs/summary` - Get logs summary statistics *(requires `logs:read`)*
 
 ## ✨ New Endpoints for Enhanced Workflow Management
 

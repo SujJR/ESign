@@ -11,6 +11,7 @@ const { createAgreementWithBestApproach, verifyAdobeSignTextTags } = require('..
 const adobeSignTemplateHandler = require('../utils/adobeSignTemplateHandler');
 const adobeSignTagHandler = require('../utils/adobeSignTagHandler');
 const adobeSignBypass = require('../utils/adobeSignBypass');
+const emailService = require('../services/emailService');
 
 /**
  * Helper function to extract recipients from template data
@@ -2019,6 +2020,70 @@ exports.sendReminder = async (req, res, next) => {
       document.lastReminderSent = new Date();
       await document.save();
 
+      // Send email notifications to unsigned recipients
+      let emailResults = [];
+      if (pendingRecipients.length > 0) {
+        try {
+          logger.info(`📧 Sending email reminders to ${pendingRecipients.length} unsigned recipients`);
+          
+          // Get signing URLs for recipients if possible
+          const recipientsWithUrls = await Promise.all(pendingRecipients.map(async (recipient) => {
+            try {
+              // Try to get signing URL for this recipient
+              if (!useLocalDataOnly && document.adobeAgreementId) {
+                const adobeSignClient = await createAdobeSignClient();
+                const signingUrlResponse = await adobeSignClient.get(`api/rest/v6/agreements/${document.adobeAgreementId}/signingUrls`);
+                const signingUrls = signingUrlResponse.data.signingUrlSetInfos;
+                
+                // Find URL for this recipient
+                let recipientSigningUrl = null;
+                for (const urlSet of signingUrls) {
+                  for (const urlInfo of urlSet.signingUrls) {
+                    if (urlInfo.email && urlInfo.email.toLowerCase() === recipient.email.toLowerCase()) {
+                      recipientSigningUrl = urlInfo.esignUrl;
+                      break;
+                    }
+                  }
+                  if (recipientSigningUrl) break;
+                }
+                
+                return {
+                  ...recipient,
+                  signingUrl: recipientSigningUrl
+                };
+              }
+              
+              return recipient;
+            } catch (urlError) {
+              logger.warn(`Could not get signing URL for ${recipient.email}: ${urlError.message}`);
+              return recipient;
+            }
+          }));
+
+          // Send email reminders
+          emailResults = await emailService.sendReminderEmails(
+            recipientsWithUrls,
+            document.originalName,
+            req.body.message
+          );
+
+          const successfulEmails = emailResults.filter(result => result.success).length;
+          if (successfulEmails > 0) {
+            logger.info(`✅ Email reminders sent successfully to ${successfulEmails}/${pendingRecipients.length} recipients`);
+          } else if (emailResults.length > 0 && emailResults[0].fallback) {
+            logger.info(`ℹ️  Email service not configured - relying on Adobe Sign API reminders`);
+          }
+
+        } catch (emailError) {
+          logger.error(`Failed to send email reminders: ${emailError.message}`);
+          emailResults = pendingRecipients.map(recipient => ({
+            success: false,
+            error: emailError.message,
+            recipient: recipient.email
+          }));
+        }
+      }
+
       // Log reminder sent
       await Log.create({
         level: 'info',
@@ -2031,21 +2096,46 @@ exports.sendReminder = async (req, res, next) => {
         metadata: {
           adobeAgreementId: document.adobeAgreementId,
           pendingRecipients: pendingRecipients.map(r => r.email),
-          reminderMessage: req.body.message
+          reminderMessage: req.body.message,
+          emailResults: emailResults.map(r => ({
+            recipient: r.recipient,
+            success: r.success,
+            error: r.error || null
+          }))
         }
       });
 
       logger.info(`Reminder sent for document: ${document.originalName}  to ${pendingRecipients.length} recipients`);
 
+      // Prepare response data
+      const responseData = { 
+        document,
+        pendingRecipients,
+        reminderSent: true,
+        sentAt: new Date(),
+        emailNotifications: {
+          total: emailResults.length,
+          successful: emailResults.filter(r => r.success).length,
+          failed: emailResults.filter(r => !r.success).length,
+          details: emailResults
+        }
+      };
+
+      // Add preview URLs for development
+      if (process.env.NODE_ENV === 'development') {
+        const previewUrls = emailResults
+          .filter(r => r.success && r.previewUrl)
+          .map(r => ({ recipient: r.recipient, previewUrl: r.previewUrl }));
+        
+        if (previewUrls.length > 0) {
+          responseData.emailPreviews = previewUrls;
+        }
+      }
+
       res.status(200).json(formatResponse(
         200,
         `Reminder sent successfully to ${pendingRecipients.length} pending recipient(s)`,
-        { 
-          document,
-          pendingRecipients,
-          reminderSent: true,
-          sentAt: new Date()
-        }
+        responseData
       ));
 
   } catch (error) {
