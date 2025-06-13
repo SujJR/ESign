@@ -2,6 +2,8 @@
 
 A Node.js REST API for electronic signatures using Adobe Sign API. This application allows users to upload documents, prepare them for e-signatures, send them to recipients, and track the status of signatures.
 
+**🔓 No Authentication Required** - This API runs without JWT authentication for easier development and testing.
+
 ## 🆕 Enhanced Features
 
 - **🚀 Dynamic signature field mapping** - Auto-generates field mapping from JSON recipients
@@ -15,7 +17,7 @@ A Node.js REST API for electronic signatures using Adobe Sign API. This applicat
 
 ## Features
 
-- User authentication with JWT
+- **🔓 No authentication required** - All endpoints are publicly accessible
 - Document upload and management with template processing
 - **🆕 Dynamic auto-extraction of recipients from JSON template data**
 - **🆕 Intelligent signature field mapping with auto-generation**
@@ -83,15 +85,10 @@ npm start
 
 ## API Endpoints
 
-### Authentication
-- `POST /api/auth/register` - Register a new user
-- `POST /api/auth/login` - Login a user
-- `GET /api/auth/me` - Get current user profile
-
 ### Documents
 - `POST /api/documents/upload` - Upload a document
 - `POST /api/documents/upload-with-data` - Upload document with template data
-- `GET /api/documents` - Get all documents for a user
+- `GET /api/documents` - Get all documents
 - `GET /api/documents/:id` - Get a specific document
 - `POST /api/documents/:id/prepare` - **🆕 ENHANCED** Prepare document with auto-mapping
 - `POST /api/documents/:id/send` - Send document for signature
@@ -110,11 +107,11 @@ npm start
 ### 🚀 Prepare Document with Auto-Mapping (Enhanced)
 ```http
 POST /api/documents/:id/prepare
-Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "useIntelligentPositioning": true
+  "useIntelligentPositioning": true,
+  "signingFlow": "SEQUENTIAL"
 }
 ```
 
@@ -124,6 +121,11 @@ Content-Type: application/json
 - **Smart recipient prioritization** - Uses explicit `recipients` array when available
 - **Duplicate prevention** - Intelligent email deduplication
 - **Only signature recipients** - Ignores project managers, approvers, etc.
+- **🆕 Sequential Signing Control** - Choose between PARALLEL (default) or SEQUENTIAL signing
+
+**Signing Flow Options:**
+- `"signingFlow": "SEQUENTIAL"` - Recipients receive emails one by one in order (default)
+- `"signingFlow": "PARALLEL"` - All recipients receive emails simultaneously
 
 **Expected JSON structure:**
 ```json
@@ -148,7 +150,6 @@ Content-Type: application/json
 ### 🆕 Get All Signing URLs
 ```http
 GET /api/documents/:id/signing-urls
-Authorization: Bearer <token>
 ```
 
 **Features:**
@@ -160,7 +161,6 @@ Authorization: Bearer <token>
 ### Send Reminder to Unsigned Recipients
 ```http
 POST /api/documents/:id/send-reminder
-Authorization: Bearer <token>
 Content-Type: application/json
 
 {
@@ -177,7 +177,6 @@ Content-Type: application/json
 ### Get Signing URL for iframe Embedding
 ```http
 GET /api/documents/:id/signing-url?recipientEmail=recipient@example.com
-Authorization: Bearer <token>
 ```
 
 **Features:**
@@ -193,18 +192,15 @@ Authorization: Bearer <token>
 1. Import the provided Postman collection (if available)
 2. Set up environment variables in Postman:
    - `base_url`: http://localhost:3000
-   - `token`: (Will be set after login)
 
-3. Register a user and login to get the JWT token
-4. Use the token for all authenticated requests
+3. Start making API requests directly (no authentication required)
 
 ## Flow for E-Signature Process
 
 ### 🚀 **Enhanced Workflow (Recommended)**
-1. **Register/Login** to get JWT token
-2. **Upload document with JSON data** using `/api/documents/upload-with-data`
+1. **Upload document with JSON data** using `/api/documents/upload-with-data`
    - Upload DOCX template + JSON file with recipients
-3. **Auto-prepare for signature** using `/api/documents/:id/prepare`
+2. **Auto-prepare for signature** using `/api/documents/:id/prepare`
    - Just send `{"useIntelligentPositioning": true}`
    - System auto-extracts recipients and generates field mapping
 4. **Send for signature** using `/api/documents/:id/send`

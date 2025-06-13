@@ -42,7 +42,6 @@ exports.getLogs = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .populate('userId', 'name email')
       .populate('documentId', 'originalName');
     
     // Get total count

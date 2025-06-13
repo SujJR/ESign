@@ -17,7 +17,6 @@ const logErrorToDb = async (err, req) => {
         stack: err.stack,
         code: err.statusCode || 500
       },
-      userId: req.user ? req.user._id : null,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
       requestPath: req.originalUrl,

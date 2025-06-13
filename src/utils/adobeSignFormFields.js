@@ -39,16 +39,17 @@ const addFormFieldsUsingTextTags = async (agreementId, recipients) => {
  * @param {string} transientDocumentId - The transient document ID
  * @param {Array} recipients - List of recipients
  * @param {string} documentName - Name of the document
+ * @param {string} signingFlow - The signing flow (SEQUENTIAL or PARALLEL)
  * @returns {Promise<string>} - Agreement ID
  */
-const createAgreementWithFormFields = async (transientDocumentId, recipients, documentName) => {
+const createAgreementWithFormFields = async (transientDocumentId, recipients, documentName, signingFlow = 'SEQUENTIAL') => {
   try {
     logger.info('Creating agreement with form fields using one-step approach');
     
     const client = await createAdobeSignClient();
     
     // Generate form fields for the recipients
-    const formFields = generateOptimizedFormFields(recipients);
+    const formFields = generateOptimizedFormFields(recipients, signingFlow);
     
     // Create agreement payload with form fields included
     const payload = {
@@ -97,9 +98,10 @@ const createAgreementWithFormFields = async (transientDocumentId, recipients, do
  * Webhook-based approach - creates agreement and waits for webhook confirmation
  * @param {string} agreementId - The Adobe Sign agreement ID  
  * @param {Array} recipients - List of recipients
+ * @param {string} signingFlow - The signing flow (SEQUENTIAL or PARALLEL)
  * @returns {Promise<Object>} - Response from Adobe Sign API
  */
-const addFormFieldsWithWebhookVerification = async (agreementId, recipients) => {
+const addFormFieldsWithWebhookVerification = async (agreementId, recipients, signingFlow = 'SEQUENTIAL') => {
   try {
     logger.info(`Adding form fields with webhook verification for agreement ${agreementId}`);
     
@@ -131,7 +133,8 @@ const addFormFieldsWithWebhookVerification = async (agreementId, recipients) => 
     }
     
     // Add form fields after webhook setup
-    const formFields = generateOptimizedFormFields(recipients);
+    // Generate form fields for the recipients
+    const formFields = generateOptimizedFormFields(recipients, signingFlow);
     const response = await client.post(
       `api/rest/v6/agreements/${agreementId}/formFields`,
       { formFields }
@@ -189,14 +192,121 @@ const createAgreementFromTemplate = async (templateId, recipients) => {
 };
 
 /**
+ * Creates agreement using text tags embedded in the document
+ * @param {string} transientDocumentId - The transient document ID
+ * @param {Array} recipients - List of recipients
+ * @param {string} documentName - Name of the document
+ * @returns {Promise<string>} - Agreement ID
+ */
+const createAgreementWithTextTags = async (transientDocumentId, recipients, documentName, signingFlow = 'SEQUENTIAL') => {
+  try {
+    logger.info('Creating agreement using Adobe Sign text tags embedded in the document');
+    
+    const client = await createAdobeSignClient();
+    
+    // Determine participant set structure based on signing flow
+    let participantSetsInfo;
+    
+    if (signingFlow === 'SEQUENTIAL') {
+      // For sequential signing, each recipient gets their own participant set with increasing order
+      participantSetsInfo = recipients.map((recipient, index) => ({
+        memberInfos: [
+          {
+            email: recipient.email || recipient
+          }
+        ],
+        order: index + 1, // Sequential order
+        role: 'SIGNER'
+      }));
+      logger.info(`Setting up sequential signing flow with ${recipients.length} participant sets`);
+    } else {
+      // For parallel signing (default), all recipients in one participant set
+      participantSetsInfo = [
+        {
+          memberInfos: recipients.map(recipient => ({
+            email: recipient.email || recipient
+          })),
+          order: 1,
+          role: 'SIGNER'
+        }
+      ];
+      logger.info(`Setting up parallel signing flow with 1 participant set containing ${recipients.length} members`);
+    }
+
+    const payload = {
+      fileInfos: [
+        {
+          transientDocumentId: transientDocumentId
+        }
+      ],
+      name: documentName,
+      participantSetsInfo,
+      signatureType: 'ESIGN',
+      state: 'IN_PROCESS',
+      // Configure options to ensure ONLY text tags are processed, no additional positioning
+      options: {
+        noChrome: false,
+        authoringRequested: false, // CRITICAL: Disable authoring to prevent Adobe from adding extra fields
+        autoLoginUser: false,
+        noSignerCertificate: false,
+        removeParticipantUsageRestrictions: false
+      },
+      // Enable text tag processing - correct format for Adobe Sign API
+      textTagsEnabled: true, // CRITICAL: Enable text tag processing at root level
+      // Add a message to guide signers
+      message: signingFlow === 'SEQUENTIAL' 
+        ? 'Please sign this document in the designated order. You will receive an email when it is your turn to sign.'
+        : 'Please sign at the signature fields indicated in the document.'
+    };
+    
+    logger.info(`Creating agreement with text tags for ${recipients.length} recipients`);
+    logger.info('Text tags enabled - signature fields will appear exactly where tags are placed');
+    
+    // Add more detailed logging for debugging purposes
+    logger.info(`Document name: ${documentName}`);
+    logger.info(`Recipient count: ${recipients.length}`);
+    logger.info('Adobe Sign configured to use text tags only - no additional positioning');
+    
+    const response = await client.post('api/rest/v6/agreements', payload);
+    
+    logger.info(`Agreement created successfully using text tags. ID: ${response.data.id}`);
+    
+    // Log additional success information
+    logger.info('Text tags processed - signature fields should appear at the tag positions only');
+    logger.info('No additional fields should be added at the end of the document');
+    
+    return response.data.id;
+    
+  } catch (error) {
+    logger.error(`Error creating agreement with text tags: ${error.message}`);
+    if (error.response) {
+      logger.error(`Status: ${error.response.status}`);
+      logger.error(`Response: ${JSON.stringify(error.response.data, null, 2)}`);
+    }
+    throw error;
+  }
+};
+
+/**
  * Generates optimized form fields with minimal configuration
  * @param {Array} recipients - List of recipients
  * @returns {Array} - Array of form field objects
  */
-const generateOptimizedFormFields = (recipients) => {
+const generateOptimizedFormFields = (recipients, signingFlow = 'SEQUENTIAL') => {
   const formFields = [];
   
   recipients.forEach((recipient, index) => {
+    // For parallel signing, we need to use participantId instead of assignedToRecipient
+    let assignmentConfig = {};
+    
+    if (signingFlow === 'PARALLEL') {
+      // In parallel signing, all recipients are in participantSet 0, so use index as participantId
+      assignmentConfig = { participantId: index.toString() };
+    } else {
+      // In sequential signing, use assignedToRecipient
+      assignmentConfig = recipient.email ? { assignedToRecipient: recipient.email } : {};
+    }
+    
     // Signature field - minimal required configuration
     formFields.push({
       fieldName: `signature_${index + 1}`,
@@ -212,8 +322,8 @@ const generateOptimizedFormFields = (recipients) => {
         width: 150,
         height: 50
       },
-      // Only add recipient assignment if email is available
-      ...(recipient.email && { assignedToRecipient: recipient.email })
+      // Assignment based on signing flow
+      ...assignmentConfig
     });
     
     // Date field
@@ -230,8 +340,8 @@ const generateOptimizedFormFields = (recipients) => {
         width: 100,
         height: 30
       },
-      // Only add recipient assignment if email is available
-      ...(recipient.email && { assignedToRecipient: recipient.email })
+      // Assignment based on signing flow
+      ...assignmentConfig
     });
   });
   
@@ -246,20 +356,30 @@ const generateOptimizedFormFields = (recipients) => {
  * @param {string} documentName - Name of the document
  * @returns {Promise<string>} - Agreement ID
  */
-const createBasicAgreement = async (transientDocumentId, recipients, documentName) => {
+const createBasicAgreement = async (transientDocumentId, recipients, documentName, signingFlow = 'SEQUENTIAL') => {
   try {
     logger.info('Creating basic agreement without explicit form fields');
     
     const client = await createAdobeSignClient();
     
-    const payload = {
-      fileInfos: [
-        {
-          transientDocumentId: transientDocumentId
-        }
-      ],
-      name: documentName,
-      participantSetsInfo: [
+    // Determine participant set structure based on signing flow
+    let participantSetsInfo;
+    
+    if (signingFlow === 'SEQUENTIAL') {
+      // For sequential signing, each recipient gets their own participant set with increasing order
+      participantSetsInfo = recipients.map((recipient, index) => ({
+        memberInfos: [
+          {
+            email: recipient.email || recipient
+          }
+        ],
+        order: index + 1, // Sequential order
+        role: 'SIGNER'
+      }));
+      logger.info(`Setting up sequential signing flow with ${recipients.length} participant sets`);
+    } else {
+      // For parallel signing (default), all recipients in one participant set
+      participantSetsInfo = [
         {
           memberInfos: recipients.map(recipient => ({
             email: recipient.email || recipient
@@ -267,7 +387,18 @@ const createBasicAgreement = async (transientDocumentId, recipients, documentNam
           order: 1,
           role: 'SIGNER'
         }
+      ];
+      logger.info(`Setting up parallel signing flow with 1 participant set containing ${recipients.length} members`);
+    }
+
+    const payload = {
+      fileInfos: [
+        {
+          transientDocumentId: transientDocumentId
+        }
       ],
+      name: documentName,
+      participantSetsInfo,
       signatureType: 'ESIGN',
       state: 'IN_PROCESS'
     };
@@ -410,14 +541,15 @@ const createAgreementWithAutoDetectedFields = async (transientDocumentId, recipi
  * Generates form fields from auto-detected signature fields
  * @param {Array} recipients - List of recipients
  * @param {Array} autoDetectedFields - Auto-detected fields from document analysis
+ * @param {string} signingFlow - The signing flow (SEQUENTIAL or PARALLEL)
  * @returns {Array} - Array of form field objects
  */
-const generateFormFieldsFromAutoDetected = (recipients, autoDetectedFields) => {
+const generateFormFieldsFromAutoDetected = (recipients, autoDetectedFields, signingFlow = 'SEQUENTIAL') => {
   const formFields = [];
   
   if (!autoDetectedFields || autoDetectedFields.length === 0) {
     // Fallback to default form fields
-    return generateOptimizedFormFields(recipients);
+    return generateOptimizedFormFields(recipients, signingFlow);
   }
   
   // Check if we have enhanced detected fields with position information
@@ -496,21 +628,39 @@ const generateFormFieldsFromAutoDetected = (recipients, autoDetectedFields) => {
  * Generates form fields that respect existing signature field positions
  * @param {Array} recipients - List of recipients
  * @param {Array} existingFields - Existing signature fields detected in document
+ * @param {string} signingFlow - The signing flow (SEQUENTIAL or PARALLEL)
  * @returns {Array} - Array of form field objects
  */
-const generateFormFieldsFromExisting = (recipients, existingFields = []) => {
+const generateFormFieldsFromExisting = (recipients, existingFields = [], signingFlow = 'SEQUENTIAL') => {
   const formFields = [];
   
   if (!existingFields || existingFields.length === 0) {
     logger.info('No existing fields detected, using default form field generation');
-    return generateOptimizedFormFields(recipients);
+    return generateOptimizedFormFields(recipients, signingFlow);
+  }
+  
+  // Filter to only include fields with valid position data
+  const validFields = existingFields.filter(f => 
+    f.x !== undefined && f.y !== undefined && 
+    f.page !== undefined && f.type !== undefined
+  );
+  
+  if (validFields.length === 0) {
+    logger.warn('No valid positioned fields found among detected fields, using default positioning');
+    return generateOptimizedFormFields(recipients, signingFlow);
   }
   
   // Sort existing fields by type
-  const signatureFields = existingFields.filter(f => f.type === 'SIGNATURE');
-  const dateFields = existingFields.filter(f => f.type === 'DATE');
+  const signatureFields = validFields.filter(f => f.type.toUpperCase() === 'SIGNATURE');
+  const dateFields = validFields.filter(f => f.type.toUpperCase() === 'DATE');
   
-  logger.info(`Found ${signatureFields.length} signature fields and ${dateFields.length} date fields in document`);
+  logger.info(`Found ${signatureFields.length} signature fields and ${dateFields.length} date fields with valid position data`);
+  
+  // Validate page numbers - ensure they're within reasonable range (1-100)
+  const validatePage = (page) => {
+    const pageNum = parseInt(page, 10);
+    return isNaN(pageNum) || pageNum < 1 || pageNum > 100 ? 1 : pageNum;
+  };
   
   recipients.forEach((recipient, recipientIndex) => {
     // Use existing signature field if available
@@ -518,18 +668,18 @@ const generateFormFieldsFromExisting = (recipients, existingFields = []) => {
       const existingField = signatureFields[recipientIndex];
       formFields.push({
         fieldName: `Signature_${recipientIndex + 1}`,
-        displayName: `Signature (${recipient.name})`,
+        displayName: `Signature (${recipient.name || `Recipient ${recipientIndex + 1}`})`,
         fieldType: 'SIGNATURE',
         visible: true,
         required: true,
-        documentPageNumber: existingField.page || 1,
+        documentPageNumber: validatePage(existingField.page),
         location: {
-          x: existingField.x || 100,
-          y: existingField.y || (600 - recipientIndex * 80)
+          x: Math.max(50, Math.min(existingField.x || 100, 500)),  // Ensure x is between 50-500
+          y: Math.max(50, Math.min(existingField.y || (600 - recipientIndex * 80), 700))  // Ensure y is between 50-700
         },
         size: {
-          width: existingField.width || 200,
-          height: existingField.height || 50
+          width: Math.max(150, Math.min(existingField.width || 200, 300)),  // Ensure width is between 150-300
+          height: Math.max(30, Math.min(existingField.height || 50, 80))  // Ensure height is between 30-80
         },
         ...(recipient.email && { assignedToRecipient: recipient.email })
       });
@@ -537,7 +687,7 @@ const generateFormFieldsFromExisting = (recipients, existingFields = []) => {
       // Create new signature field if no existing field available
       formFields.push({
         fieldName: `Signature_${recipientIndex + 1}`,
-        displayName: `Signature (${recipient.name})`,
+        displayName: `Signature (${recipient.name || `Recipient ${recipientIndex + 1}`})`,
         fieldType: 'SIGNATURE',
         visible: true,
         required: true,
@@ -559,18 +709,18 @@ const generateFormFieldsFromExisting = (recipients, existingFields = []) => {
       const existingField = dateFields[recipientIndex];
       formFields.push({
         fieldName: `Date_${recipientIndex + 1}`,
-        displayName: `Date (${recipient.name})`,
+        displayName: `Date (${recipient.name || `Recipient ${recipientIndex + 1}`})`,
         fieldType: 'DATE',
         visible: true,
         required: true,
-        documentPageNumber: existingField.page || 1,
+        documentPageNumber: validatePage(existingField.page),
         location: {
-          x: existingField.x || 350,
-          y: existingField.y || (600 - recipientIndex * 80)
+          x: Math.max(50, Math.min(existingField.x || 350, 500)),  // Ensure x is between 50-500
+          y: Math.max(50, Math.min(existingField.y || (600 - recipientIndex * 80), 700))  // Ensure y is between 50-700
         },
         size: {
-          width: existingField.width || 120,
-          height: existingField.height || 30
+          width: Math.max(80, Math.min(existingField.width || 120, 200)),  // Ensure width is between 80-200
+          height: Math.max(20, Math.min(existingField.height || 30, 50))  // Ensure height is between 20-50
         },
         ...(recipient.email && { assignedToRecipient: recipient.email })
       });
@@ -578,7 +728,7 @@ const generateFormFieldsFromExisting = (recipients, existingFields = []) => {
       // Create new date field if no existing field available
       formFields.push({
         fieldName: `Date_${recipientIndex + 1}`,
-        displayName: `Date (${recipient.name})`,
+        displayName: `Date (${recipient.name || `Recipient ${recipientIndex + 1}`})`,
         fieldType: 'DATE',
         visible: true,
         required: true,
@@ -597,223 +747,164 @@ const generateFormFieldsFromExisting = (recipients, existingFields = []) => {
   });
   
   logger.info(`Generated ${formFields.length} form fields based on ${existingFields.length} existing fields`);
+  
+  // Log field details for debugging
+  formFields.forEach((field, index) => {
+    logger.debug(`Field ${index + 1}: ${field.fieldName} (${field.fieldType}) at (${field.location.x}, ${field.location.y}) on page ${field.documentPageNumber}`);
+  });
+  
   return formFields;
 };
 
 /**
- * Creates agreement with explicit form fields at detected positions
- * This approach directly places form fields at the positions detected in the document
- * @param {string} transientDocumentId - The transient document ID
- * @param {Array} recipients - List of recipients
- * @param {string} documentName - Name of the document
- * @param {Array} detectedFields - Fields detected with position information
- * @returns {Promise<string>} - Agreement ID
+ * Verifies that text tags in a document are in the correct format for Adobe Sign
+ * This helps diagnose issues when signatures are not appearing at the correct positions
+ * @param {Array} autoDetectedSignatureFields - Fields detected in the document
+ * @returns {Object} - Verification result
  */
-const createAgreementWithExplicitFields = async (transientDocumentId, recipients, documentName, detectedFields = []) => {
-  try {
-    logger.info('Creating agreement with explicit form fields at detected positions');
-    logger.info(`Using ${detectedFields.length} detected fields with position information`);
-    
-    const client = await createAdobeSignClient();
-    
-    // Generate form fields using detected positions
-    const formFields = generateFormFieldsFromExisting(recipients, detectedFields);
-    
-    if (formFields.length === 0) {
-      throw new Error('No form fields generated from detected positions');
-    }
-    
-    const payload = {
-      fileInfos: [
-        {
-          transientDocumentId: transientDocumentId
-        }
-      ],
-      name: documentName,
-      participantSetsInfo: recipients.map((recipient, index) => ({
-        memberInfos: [
-          {
-            email: recipient.email || recipient
-          }
-        ],
-        order: index + 1,
-        role: 'SIGNER'
-      })),
-      signatureType: 'ESIGN',
-      state: 'IN_PROCESS',
-      // Include explicit form fields based on detected positions
-      formFieldLayerTemplates: [
-        {
-          formFields: formFields
-        }
-      ]
+const verifyAdobeSignTextTags = (autoDetectedSignatureFields = []) => {
+  const result = {
+    hasTags: false,
+    correctFormat: true,
+    issuesFound: [],
+    recommendations: []
+  };
+  
+  // Extract text tags from the detected fields - check for both single and double braces
+  const textTags = autoDetectedSignatureFields
+    .filter(field => field.matchText && (
+      field.matchText.includes('sig_es_:signer') ||
+      field.matchText.includes('*ES_:signer') ||
+      field.matchText.includes('signer') && field.matchText.includes(':signature') ||
+      field.matchText.includes('{{sig_es_:signer') ||  // Also check for double braces
+      field.matchText.includes('{{*ES_:signer') ||
+      field.matchText.includes('{{signer') && field.matchText.includes(':signature}}')
+    ))
+    .map(field => field.matchText);
+  
+  // Check if we have any tags
+  if (textTags.length === 0) {
+    return {
+      ...result,
+      recommendations: ['No Adobe Sign text tags detected. If your document contains tags, ensure they are in the correct format.']
     };
-    
-    logger.info(`Creating agreement with ${formFields.length} explicit form fields at detected positions`);
-    
-    // Log field positions for debugging
-    formFields.forEach((field, index) => {
-      logger.info(`Field ${index + 1}: ${field.fieldName} at (${field.location?.x}, ${field.location?.y}) on page ${field.documentPageNumber}`);
-    });
-    
-    const response = await client.post('api/rest/v6/agreements', payload);
-    
-    logger.info(`Agreement created successfully with explicit fields at detected positions. ID: ${response.data.id}`);
-    return response.data.id;
-    
-  } catch (error) {
-    logger.error(`Error creating agreement with explicit fields: ${error.message}`);
-    if (error.response) {
-      logger.error(`Status: ${error.response.status}`);
-      logger.error(`Response: ${JSON.stringify(error.response.data, null, 2)}`);
-    }
-    throw error;
   }
+  
+  result.hasTags = true;
+  
+  // Check if tags are in the correct format
+  const issuesFound = [];
+  
+  textTags.forEach(tag => {
+    // Check if the tag is properly formatted with single curly braces
+    if (!tag.startsWith('{') || !tag.endsWith('}')) {
+      issuesFound.push(`Tag "${tag}" is not properly formatted with curly braces`);
+      result.correctFormat = false;
+    }
+    
+    // Check if the tag is using double curly braces (old format)
+    if (tag.startsWith('{{') && tag.endsWith('}}')) {
+      issuesFound.push(`Tag "${tag}" is using double curly braces which is no longer supported`);
+      result.correctFormat = false;
+    }
+    
+    // Check if the tag contains proper signer format
+    if (!tag.match(/signer\d+/)) {
+      issuesFound.push(`Tag "${tag}" does not contain proper signer format (e.g., signer1)`);
+      result.correctFormat = false;
+    }
+  });
+  
+  result.issuesFound = issuesFound;
+  
+  // Add recommendations based on issues found
+  if (!result.correctFormat) {
+    result.recommendations = [
+      'Update your document to use the correct format for Adobe Sign text tags.',
+      'Use single curly braces for tags: {sig_es_:signer1:signature}',
+      'Make sure each signer is correctly numbered (signer1, signer2, etc.)',
+      'Keep text tags on a single line without any formatting that might break them'
+    ];
+  } else {
+    result.recommendations = [
+      'Text tags are correctly formatted. If signatures are not appearing at the right position:',
+      '1. Make sure the document conversion process preserves the tags',
+      '2. Try using a simpler document format',
+      '3. Check if the recipients match the signer numbers in your tags'
+    ];
+  }
+  
+  return result;
 };
 
 /**
- * Comprehensive form field approach - tries multiple methods
- * @param {string} transientDocumentId - The transient document ID
- * @param {Array} recipients - List of recipients
- * @param {string} documentName - Name of the document
- * @param {Object} options - Options for form field creation
- * @returns {Promise<Object>} - Result object with agreement ID and method used
- */
-const createAgreementWithBestApproach = async (transientDocumentId, recipients, documentName, options = {}) => {
-  const { autoDetectedSignatureFields = [], useIntelligentPositioning = true } = options;
-  
-  // Enhanced approaches that can handle auto-detected fields
-  // Prioritize explicit form field creation when we have detected fields with positions
-  const hasDetectedFieldsWithPositions = autoDetectedSignatureFields.some(field => 
-    field.x !== undefined && field.y !== undefined && field.detected === true
-  );
-  
-  const approaches = [
-    // If we have detected fields with positions, prioritize explicit form field creation
-    ...(hasDetectedFieldsWithPositions ? [{
-      name: 'explicit-fields-from-detected',
-      fn: () => createAgreementWithExplicitFields(transientDocumentId, recipients, documentName, autoDetectedSignatureFields)
-    }] : []),
-    {
-      name: 'enhanced-positioning',
-      fn: () => createAgreementWithEnhancedPositioning(transientDocumentId, recipients, documentName, { autoDetectedSignatureFields, useIntelligentPositioning })
-    },
-    {
-      name: 'one-step-with-auto-detected',
-      fn: () => createAgreementWithAutoDetectedFields(transientDocumentId, recipients, documentName, autoDetectedSignatureFields)
-    },
-    {
-      name: 'intelligent-positioning',
-      fn: () => createAgreementWithIntelligentPositioning(transientDocumentId, recipients, documentName, { autoDetectedSignatureFields, useIntelligentPositioning })
-    },
-    {
-      name: 'one-step-with-fields',
-      fn: () => createAgreementWithFormFields(transientDocumentId, recipients, documentName)
-    },
-    {
-      name: 'basic',
-      fn: () => createBasicAgreement(transientDocumentId, recipients, documentName)
-    }
-  ];
-  
-  // If template ID is provided, try template approach first
-  if (options.templateId) {
-    approaches.unshift({
-      name: 'template',
-      fn: () => createAgreementFromTemplate(options.templateId, recipients)
-    });
-  }
-  
-  let lastError = null;
-  
-  for (const approach of approaches) {
-    try {
-      logger.info(`Trying ${approach.name} approach with ${autoDetectedSignatureFields.length} auto-detected fields`);
-      const agreementId = await approach.fn();
-      
-      logger.info(`✅ Successfully created agreement using ${approach.name} approach`);
-      return {
-        agreementId,
-        method: approach.name,
-        success: true,
-        autoDetectedFieldsUsed: autoDetectedSignatureFields.length
-      };
-      
-    } catch (error) {
-      logger.warn(`❌ ${approach.name} approach failed: ${error.message}`);
-      lastError = error;
-      
-      // Continue to next approach
-      continue;
-    }
-  }
-  
-  // If all approaches failed
-  logger.error('All form field approaches failed');
-  throw lastError || new Error('All form field creation approaches failed');
-};
-
-/**
- * Creates agreement with enhanced intelligent positioning that recognizes existing signature fields
+ * Simplified approach that only uses text tags when detected
+ * Removes all enhanced positioning and intelligent positioning
  * @param {string} transientDocumentId - The transient document ID
  * @param {Array} recipients - List of recipients
  * @param {string} documentName - Name of the document
  * @param {Object} options - Options including auto-detected fields
- * @returns {Promise<string>} - Agreement ID
+ * @returns {Promise<Object>} - Object with agreementId and method used
  */
-const createAgreementWithEnhancedPositioning = async (transientDocumentId, recipients, documentName, options = {}) => {
+const createAgreementWithBestApproach = async (transientDocumentId, recipients, documentName, options = {}) => {
   try {
-    logger.info('Creating agreement with enhanced intelligent positioning to recognize existing signature fields');
+    logger.info(`Creating agreement for document: ${documentName}`);
     
-    const client = await createAdobeSignClient();
+    const { autoDetectedSignatureFields = [], signingFlow = 'SEQUENTIAL' } = options;
     
-    const payload = {
-      fileInfos: [
-        {
-          transientDocumentId: transientDocumentId
-        }
-      ],
-      name: documentName,
-      participantSetsInfo: recipients.map((recipient, index) => ({
-        memberInfos: [
-          {
-            email: recipient.email || recipient
-          }
-        ],
-        order: index + 1,
-        role: 'SIGNER'
-      })),
-      signatureType: 'ESIGN',
-      state: 'IN_PROCESS',
-      // Enhanced options for better field recognition
-      options: {
-        noChrome: false,
-        authoringRequested: true, // Enables intelligent positioning
-        mergeFieldInfo: {
-          // This tells Adobe Sign to look for existing form fields and signature areas
-          includeMergeFields: true
-        }
-      },
-      // Set post-sign redirect options
-      postSignOption: {
-        redirectDelay: 0,
-        redirectUrl: process.env.ADOBE_SIGN_REDIRECT_URL || 'https://www.adobe.com/go/adobesign_success'
+    // Step 1: Check if document has Adobe Sign text tags (double braces format)
+    let hasTextTags = false;
+    if (autoDetectedSignatureFields && autoDetectedSignatureFields.length > 0) {
+      // Check if any of the detected fields contain Adobe Sign tags
+      hasTextTags = autoDetectedSignatureFields.some(field => 
+        field.matchText && (
+          field.matchText.includes('{{sig_es_:signer') ||
+          field.matchText.includes('{{*ES_:signer') ||
+          field.matchText.includes('{{signer') && field.matchText.includes(':signature}}') ||
+          field.matchText.includes('{{date_es_:signer') ||
+          field.matchText.includes('{{signer') && field.matchText.includes(':date}}') ||
+          // Also check for single braces (legacy format)
+          field.matchText.includes('{sig_es_:signer') ||
+          field.matchText.includes('{*ES_:signer') ||
+          field.matchText.includes('{signer') && field.matchText.includes(':signature}')
+        )
+      );
+    }
+    
+    if (hasTextTags) {
+      logger.info('Adobe Sign text tags detected - using text tag approach ONLY');
+      try {
+        const agreementId = await createAgreementWithTextTags(transientDocumentId, recipients, documentName, signingFlow);
+        return {
+          agreementId,
+          method: 'text-tags',
+          success: true,
+          message: 'Agreement created using Adobe Sign text tags - signatures will appear at tag positions'
+        };
+      } catch (textTagError) {
+        logger.error(`Text tag approach failed: ${textTagError.message}`);
+        throw new Error(`Failed to create agreement with text tags: ${textTagError.message}`);
       }
-    };
+    }
     
-    logger.info(`Creating agreement with enhanced positioning for ${recipients.length} recipients`);
-    const response = await client.post('api/rest/v6/agreements', payload);
-    
-    logger.info(`Agreement created successfully with enhanced positioning. ID: ${response.data.id}`);
-    return response.data.id;
+    // Step 2: No text tags detected - use basic agreement approach
+    logger.info('No Adobe Sign text tags detected - using basic agreement approach');
+    try {
+      const agreementId = await createBasicAgreement(transientDocumentId, recipients, documentName, signingFlow);
+      return {
+        agreementId,
+        method: 'basic-agreement',
+        success: true,
+        message: 'Agreement created using basic approach - Adobe Sign will auto-add signature fields'
+      };
+    } catch (basicError) {
+      logger.error(`Basic agreement approach failed: ${basicError.message}`);
+      throw new Error(`Failed to create agreement: ${basicError.message}`);
+    }
     
   } catch (error) {
-    logger.error(`Error creating agreement with enhanced positioning: ${error.message}`);
-    if (error.response) {
-      logger.error(`Status: ${error.response.status}`);
-      logger.error(`Response: ${JSON.stringify(error.response.data, null, 2)}`);
-    }
-    throw error;
+    logger.error(`All approaches failed for document ${documentName}: ${error.message}`);
+    throw new Error(`Failed to create agreement: ${error.message}`);
   }
 };
 
@@ -828,7 +919,7 @@ module.exports = {
   createAgreementWithAutoDetectedFields,
   generateOptimizedFormFields,
   generateFormFieldsFromAutoDetected,
-  createAgreementWithEnhancedPositioning,
   generateFormFieldsFromExisting,
-  createAgreementWithExplicitFields
+  createAgreementWithTextTags,
+  verifyAdobeSignTextTags
 };

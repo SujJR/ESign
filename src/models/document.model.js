@@ -39,7 +39,9 @@ const documentSchema = new mongoose.Schema(
     },
     creator: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+      ref: 'User',
+      required: false,
+      default: null
     },
     recipients: [
       {
@@ -48,7 +50,7 @@ const documentSchema = new mongoose.Schema(
         order: { type: Number, default: 1 },
         status: { 
           type: String, 
-          enum: ['pending', 'sent', 'viewed', 'signed', 'declined', 'expired'],
+          enum: ['pending', 'sent', 'viewed', 'signed', 'declined', 'expired', 'waiting'],
           default: 'pending'
         },
         signedAt: { type: Date, default: null },
@@ -61,10 +63,6 @@ const documentSchema = new mongoose.Schema(
     adobeMetadata: {
       type: mongoose.Schema.Types.Mixed,
       default: {}
-    },
-    useIntelligentPositioning: {
-      type: Boolean,
-      default: true
     },
     signatureFieldMapping: {
       type: mongoose.Schema.Types.Mixed,
@@ -101,6 +99,15 @@ const documentSchema = new mongoose.Schema(
     reminderCount: {
       type: Number,
       default: 0
+    },
+    signingFlow: {
+      type: String,
+      enum: ['SEQUENTIAL', 'PARALLEL'],
+      default: 'SEQUENTIAL'
+    },
+    errorMessage: {
+      type: String,
+      default: null
     }
   },
   {

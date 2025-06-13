@@ -1,12 +1,8 @@
 const express = require('express');
 const documentController = require('../controllers/document.controller');
-const { protect } = require('../middleware/auth');
 const { uploadDocument, uploadDocumentWithData, handleMulterErrors } = require('../middleware/upload');
 
 const router = express.Router();
-
-// Apply protection middleware to all routes
-router.use(protect);
 
 // Upload document
 router.post('/upload', uploadDocument, handleMulterErrors, documentController.uploadDocument);

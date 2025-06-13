@@ -12,7 +12,6 @@ dotenv.config();
 const connectDB = require('./config/db');
 
 // Import routes
-const authRoutes = require('./routes/auth.routes');
 const documentRoutes = require('./routes/document.routes');
 const logRoutes = require('./routes/log.routes');
 
@@ -42,13 +41,16 @@ app.use(logger.morganMiddleware);
 // Basic route
 app.get('/', (req, res) => {
   res.json({
-    message: 'Welcome to the ESign API',
-    version: '1.0.0'
+    message: 'Welcome to the ESign API - No Authentication Required',
+    version: '1.0.0',
+    endpoints: {
+      documents: '/api/documents',
+      logs: '/api/logs'
+    }
   });
 });
 
 // API routes
-app.use('/api/auth', authRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/logs', logRoutes);
 

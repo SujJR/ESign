@@ -62,9 +62,46 @@ const processDocxTemplate = async (filePath, data) => {
     const doc = new docxtemplater(zip, {
       paragraphLoop: true,
       linebreaks: true,
-      delimiters: {
-        start: '{',
-        end: '}'
+      // Custom parser to preserve Adobe Sign tags and process regular template variables
+      parser: function customParser(tag) {
+        // Check if this is an Adobe Sign tag
+        const isAdobeSignTag = (tag) => {
+          // Remove any surrounding braces for checking
+          const cleanTag = tag.replace(/^\{+|\}+$/g, '');
+          return cleanTag.includes('sig_es_:signer') || 
+                 cleanTag.includes('*ES_:signer') ||
+                 cleanTag.includes('Sig_es_:signer') ||
+                 cleanTag.includes('esig_') ||
+                 cleanTag.includes('_es_:signer') ||
+                 cleanTag.includes('signature_es') ||
+                 cleanTag.includes('initial_es') ||
+                 cleanTag.includes('date_es_:signer') ||
+                 cleanTag.includes('signer') && cleanTag.includes(':signature') ||
+                 cleanTag.includes('signer') && cleanTag.includes(':initial') ||
+                 cleanTag.includes('signer') && cleanTag.includes(':date');
+        };
+        
+        // Check if any Adobe Sign pattern is found in the tag
+        if (isAdobeSignTag(tag)) {
+          logger.info(`Preserving Adobe Sign tag: {{${tag}}}`);
+          // For Adobe Sign tags, return exactly what we want in the document
+          const adobeSignTag = `{{${tag}}}`;
+          return {
+            get: function() { return ''; },
+            render: function() { 
+              // Return the complete Adobe Sign tag without any additional processing
+              return adobeSignTag;
+            }
+          };
+        }
+        
+        // Log regular template variables for debugging
+        logger.debug(`Processing template variable: {${tag}}`);
+        
+        // Default parser for regular template variables
+        return {
+          get: function() { return tag; }
+        };
       }
     });
     
@@ -81,9 +118,24 @@ const processDocxTemplate = async (filePath, data) => {
       if (error.properties) {
         logger.error('Template error details:', JSON.stringify(error.properties, null, 2));
         
+        // If it might be an Adobe Sign tag related error
+        if (error.properties.id === 'unopened_tag' || 
+            error.properties.id === 'unclosed_tag' || 
+            (error.properties.xtag && (
+              error.properties.xtag.includes('sig_es_') || 
+              error.properties.xtag.includes('*ES_') ||
+              error.properties.xtag.includes('signer')
+            ))) {
+          logger.warn('This appears to be an Adobe Sign tag related error. Trying fallback processing...');
+          
+          // Import and use the bypass processor
+          const adobeSignBypass = require('./adobeSignBypass');
+          return await adobeSignBypass.bypassTemplateProcessing(filePath, data);
+        }
+        
         // If it's a duplicate tag error, provide helpful message
         if (error.properties.id === 'duplicate_open_tag' || error.properties.id === 'duplicate_close_tag') {
-          throw new Error(`Template format error: The template contains malformed variables. Please ensure all template variables are properly formatted as {variableName} without spaces or line breaks within the curly braces. Problematic tag: ${error.properties.xtag}`);
+          throw new Error(`Template format error: The template contains malformed variables. Please ensure all template variables are properly formatted without spaces or line breaks within the curly braces. Adobe Sign tags should use single curly braces like {sig_es_:signer1:signature}. Problematic tag: ${error.properties.xtag}`);
         }
       }
       
@@ -255,12 +307,23 @@ const extractTemplateVariables = (content) => {
     // Match variables in curly braces: {variable} or {{variable}}
     const variableRegex = /\{\{?([^}]+)\}?\}/g;
     const variables = [];
+    const adobeSignTags = [];
     let match;
     
     while ((match = variableRegex.exec(content)) !== null) {
       const variableName = match[1].trim();
-      // Filter out common non-template patterns
-      if (!variableName.includes('*') && !variableName.includes(':') && variableName.length > 0) {
+      // Check for Adobe Sign signature tags (expanded patterns)
+      if ((variableName.includes('sig_es_:signer') || 
+           variableName.includes('*ES_:signer') || 
+           variableName.includes('Sig_es_:signer') || 
+           (variableName.includes('esig_') && variableName.includes(':signer')) || 
+           variableName.includes('_es_:signer')) && 
+          (variableName.includes(':signature') || variableName.match(/signer\d+$/i))) {
+        // This is an Adobe Sign signature tag, preserve it as is
+        adobeSignTags.push(match[0]); // Keep the full tag with braces
+      } 
+      // Filter out common non-template patterns for regular variables
+      else if (!variableName.includes('*') && !variableName.includes(':') && variableName.length > 0) {
         if (!variables.includes(variableName)) {
           variables.push(variableName);
         }
@@ -268,6 +331,10 @@ const extractTemplateVariables = (content) => {
     }
     
     logger.info(`Found ${variables.length} template variables: ${variables.join(', ')}`);
+    if (adobeSignTags.length > 0) {
+      logger.info(`Found ${adobeSignTags.length} Adobe Sign signature tags: ${adobeSignTags.join(', ')}`);
+    }
+    
     return variables;
   } catch (error) {
     logger.error(`Error extracting template variables: ${error.message}`);
@@ -288,6 +355,70 @@ const detectSignatureFields = (textContent, htmlContent = '') => {
   const contentText = typeof textContent === 'string' ? textContent : '';
   const htmlText = typeof htmlContent === 'string' ? htmlContent : '';
   
+  // First check for Adobe Sign text tags in both double and single braces
+  const adobeSignPatterns = [
+    // Double braces format (preferred)
+    /\{\{sig_es_:signer\d+:signature\}\}/g,
+    /\{\{\*ES_:signer\d+:signature\}\}/g,
+    /\{\{Sig_es_:signer\d+:signature\}\}/g,
+    /\{\{signer\d+:signature\}\}/g,
+    /\{\{date_es_:signer\d+:date\}\}/g,
+    /\{\{signer\d+:date\}\}/g,
+    // Single braces format (legacy)
+    /\{sig_es_:signer\d+:signature\}/g,
+    /\{\*ES_:signer\d+:signature\}/g,
+    /\{Sig_es_:signer\d+:signature\}/g,
+    /\{signer\d+:signature\}/g,
+    /\{date_es_:signer\d+:date\}/g,
+    /\{signer\d+:date\}/g,
+    // Other patterns
+    /\{esig_.*?:signer\d+\}/g,
+    /\{_es_:signer\d+.*?\}/g,
+    /\{signature_es.*?\}/g,
+    /\{initial_es.*?\}/g,
+    /\{signer\d+:initial\}/g
+  ];
+  
+  // Look for Adobe Sign tags and extract them
+  let adobeSignFields = [];
+  adobeSignPatterns.forEach(pattern => {
+    const matches = contentText.match(pattern);
+    if (matches && matches.length > 0) {
+      matches.forEach(match => {
+        // Extract signer number and field type
+        let signerNum = 1;
+        let fieldType = 'SIGNATURE';
+        
+        if (match.includes('signer')) {
+          const signerMatch = match.match(/signer(\d+)/);
+          if (signerMatch) signerNum = parseInt(signerMatch[1], 10);
+        }
+        
+        if (match.includes('date')) fieldType = 'DATE';
+        if (match.includes('initial')) fieldType = 'INITIAL';
+        
+        adobeSignFields.push({
+          name: `AdobeSign_${fieldType}_${signerNum}`,
+          type: fieldType,
+          detected: true,
+          adobeSignTag: match,
+          signer: signerNum,
+          matchText: match,  // Add matchText for compatibility with detection logic
+          isAdobeSignTag: true  // Flag to explicitly identify this as an Adobe Sign tag
+        });
+      });
+    }
+  });
+  
+  // If Adobe Sign tags were found, return them as signature fields
+  if (adobeSignFields.length > 0) {
+    logger.info(`Detected ${adobeSignFields.length} Adobe Sign tags in document`);
+    adobeSignFields.forEach(field => {
+      logger.info(`  - ${field.adobeSignTag} (Signer ${field.signer}, Type: ${field.type})`);
+    });
+    return adobeSignFields;
+  }
+
   // Common signature-related patterns (excluding date-related patterns)
   const signaturePatterns = [
     /signature/gi,
@@ -406,6 +537,20 @@ const detectExistingSignatureFields = (textContent, htmlContent = '') => {
   
   // Enhanced patterns for existing signature fields
   const signatureFieldPatterns = [
+    // Adobe Sign text tags (double braces format - preferred)
+    /\{\{sig_es_:signer\d+:signature\}\}/gi,
+    /\{\{\*ES_:signer\d+:signature\}\}/gi,
+    /\{\{Sig_es_:signer\d+\}\}/gi, 
+    /\{\{Sig\d*_es_:signer\d+:signature\}\}/gi,
+    /\{\{esig_\w+:signer\d+\}\}/gi,
+    /\{\{signer\d+:signature\}\}/gi,
+    // Adobe Sign text tags (single braces format - legacy)
+    /\{sig_es_:signer\d+:signature\}/gi,
+    /\{\*ES_:signer\d+:signature\}/gi,
+    /\{Sig_es_:signer\d+\}/gi, 
+    /\{Sig\d*_es_:signer\d+:signature\}/gi,
+    /\{esig_\w+:signer\d+\}/gi,
+    /\{signer\d+:signature\}/gi,
     // Common signature field indicators (NOT date-related)
     /signature:\s*_+/gi,
     /sign\s+here:\s*_+/gi,
@@ -429,6 +574,13 @@ const detectExistingSignatureFields = (textContent, htmlContent = '') => {
 
   // Date field patterns - more specific and separate from signature patterns
   const dateFieldPatterns = [
+    // Adobe Sign date tags (double braces format - preferred)
+    /\{\{date_es_:signer\d+:date\}\}/gi,
+    /\{\{signer\d+:date\}\}/gi,
+    // Adobe Sign date tags (single braces format - legacy)
+    /\{date_es_:signer\d+:date\}/gi,
+    /\{signer\d+:date\}/gi,
+    // Regular date patterns
     /date:\s*_+/gi,
     /date\s+signed:\s*_+/gi,
     /_+\s*\(date\)/gi,
@@ -446,7 +598,23 @@ const detectExistingSignatureFields = (textContent, htmlContent = '') => {
   signatureFieldPatterns.forEach(pattern => {
     const matches = contentText.matchAll(pattern);
     for (const match of matches) {
-      const fieldName = `ExistingSignature_${fieldCounter}`;
+      let fieldName = `ExistingSignature_${fieldCounter}`;
+      let recipientIndex = 0;
+      
+      // Check if this is an Adobe Sign tag with signature format
+      if (match[0].includes('sig_es_:signer') || 
+          match[0].includes('*ES_:signer') || 
+          match[0].includes('Sig_es_:signer') || 
+          match[0].includes('esig_') || 
+          match[0].includes('_es_:signer')) {
+        
+        // Extract signer number from Adobe tag
+        const signerMatch = match[0].match(/signer(\d+)/i);
+        if (signerMatch && signerMatch[1]) {
+          recipientIndex = parseInt(signerMatch[1], 10) - 1; // Zero-based index
+          fieldName = `AdobeSignTag_Signer${recipientIndex + 1}`;
+        }
+      }
       
       // Better position estimation based on text analysis
       const textPosition = match.index || 0;
@@ -547,9 +715,9 @@ const detectExistingSignatureFields = (textContent, htmlContent = '') => {
     }
   });
 
-  // Check HTML content for form elements or special formatting
+  // Check HTML content for additional clues if available
   if (htmlText) {
-    // Look for underlined text that might be signature lines
+    // Look for underlined text, which might indicate signature lines
     const underlineMatches = htmlText.matchAll(/<u[^>]*>([^<]+)<\/u>/gi);
     for (const match of underlineMatches) {
       const text = match[1].trim();
@@ -626,12 +794,36 @@ const analyzeDocumentForSignatureFields = async (filePath) => {
       // Find template variables in curly braces
       templateVariables = extractTemplateVariables(textContent);
       
-      // Detect potential signature fields using enhanced detection
-      signatureFields = detectExistingSignatureFields(textContent, htmlContent);
+      // First, check specifically for Adobe Sign text tags
+      const adobeSignTagRegex = /\{sig_es_:signer\d+:signature\}|\{\*ES_:signer\d+:signature\}|\{signer\d+:signature\}/g;
+      const hasAdobeSignTags = adobeSignTagRegex.test(textContent);
       
-      // Fallback to basic detection if no existing fields found
-      if (signatureFields.length === 0) {
+      if (hasAdobeSignTags) {
+        // If Adobe Sign tags are found, prioritize them over other detection methods
+        logger.info('Adobe Sign text tags found in document - using text tag approach');
+        // Reset regex state
+        adobeSignTagRegex.lastIndex = 0;
+        
+        // Extract all Adobe Sign tags
         signatureFields = detectSignatureFields(textContent, htmlContent);
+        
+        // Log each detected tag
+        const tags = Array.from(textContent.matchAll(/\{sig_es_:signer\d+:signature\}|\{\*ES_:signer\d+:signature\}|\{signer\d+:signature\}/g));
+        if (tags.length > 0) {
+          logger.info(`Found ${tags.length} Adobe Sign text tags in document`);
+          tags.forEach(tag => {
+            logger.info(`  - ${tag[0]}`);
+          });
+        }
+      } else {
+        // If no Adobe Sign tags, use standard detection methods
+        // Detect potential signature fields using enhanced detection
+        signatureFields = detectExistingSignatureFields(textContent, htmlContent);
+        
+        // Fallback to basic detection if no existing fields found
+        if (signatureFields.length === 0) {
+          signatureFields = detectSignatureFields(textContent, htmlContent);
+        }
       }
       
       logger.info(`DOCX analysis complete: ${templateVariables.length} variables, ${signatureFields.length} signature fields`);
@@ -724,6 +916,233 @@ const validateTemplateData = (templateData, templateVariables) => {
   };
 };
 
+/**
+ * Detects Adobe Sign tags in document content
+ * @param {string} content - Text content of the document
+ * @returns {Array<string>} - Array of detected Adobe Sign tags
+ */
+const detectAdobeSignTags = (content) => {
+  const tags = [];
+  
+  // Patterns for double braces format (correct format)
+  const doubleAdobeSignPatterns = [
+    /\{\{sig_es_:signer\d+:signature\}\}/g,
+    /\{\{\*ES_:signer\d+:signature\}\}/g,
+    /\{\{Sig_es_:signer\d+\}\}/g, 
+    /\{\{Sig\d*_es_:signer\d+:signature\}\}/g,
+    /\{\{esig_\w+:signer\d+\}\}/g,
+    /\{\{date_es_:signer\d+:date\}\}/g,
+    /\{\{text_es_:signer\d+:\w+\}\}/g,
+    /\{\{check_es_:signer\d+:\w+\}\}/g
+  ];
+  
+  // Patterns for single braces format (legacy/alternative)
+  const singleAdobeSignPatterns = [
+    /\{sig_es_:signer\d+:signature\}/g,
+    /\{\*ES_:signer\d+:signature\}/g,
+    /\{Sig_es_:signer\d+\}/g, 
+    /\{Sig\d*_es_:signer\d+:signature\}/g,
+    /\{esig_\w+:signer\d+\}/g,
+    /\{date_es_:signer\d+:date\}/g,
+    /\{text_es_:signer\d+:\w+\}/g,
+    /\{check_es_:signer\d+:\w+\}/g
+  ];
+  
+  // Check for both formats, but prioritize double braces (the correct format)
+  const allPatterns = [...doubleAdobeSignPatterns, ...singleAdobeSignPatterns];
+  
+  allPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      if (!tags.includes(match[0])) {
+        tags.push(match[0]);
+      }
+    }
+  });
+  
+  return tags;
+};
+
+/**
+ * Process document with Adobe Sign tags - Direct approach
+ * This method skips docxtemplater for documents with Adobe Sign tags
+ * @param {string} filePath - Path to the document file
+ * @param {Object} data - JSON data for template variables
+ * @returns {Promise<string>} - Path to processed document
+ */
+const processDocumentWithAdobeSignTags = async (filePath, data = {}) => {
+  try {
+    logger.info('Processing document with Adobe Sign text tags');
+    
+    const ext = path.extname(filePath).toLowerCase();
+    
+    // Import the tag normalizer
+    const { normalizeAdobeSignTags } = require('./adobeSignTagNormalizer');
+    
+    // Use the specialized adobeSignTemplateHandler for proper tag handling
+    if (['.docx', '.doc'].includes(ext)) {
+      // First, check if we need to normalize the tags
+      if (['.docx'].includes(ext)) {
+        try {
+          // Read the document XML
+          const docContent = await extractTextFromDocx(filePath);
+          
+          // Check if it contains double-brace Adobe Sign tags
+          const doubleTagPattern = /\{\{(sig_es_|date_es_|\*ES_|signer\d+:)/i;
+          if (doubleTagPattern.test(docContent)) {
+            logger.info('Detected double-brace Adobe Sign tags, normalizing to single-brace format');
+            
+            // This will be handled by the specialized template handler
+            // which now incorporates tag normalization
+          }
+        } catch (docReadError) {
+          logger.warn(`Could not pre-check document for tag format: ${docReadError.message}`);
+        }
+      }
+      
+      // Import the specialized handler
+      const adobeSignTemplateHandler = require('./adobeSignTemplateHandler');
+      return await adobeSignTemplateHandler.processAdobeSignTemplate(filePath, data);
+    } else if (ext === '.pdf') {
+      // PDF files don't support template processing, return as-is
+      logger.info('PDF file provided, no template processing needed');
+      return filePath;
+    }
+    
+    throw new Error(`Unsupported file format for Adobe Sign tags: ${ext}`);
+  } catch (error) {
+    logger.error(`Error processing document with Adobe Sign tags: ${error.message}`);
+    throw error;
+  }
+};
+
+// Function to detect if a document contains Adobe Sign tags
+const containsAdobeSignTags = async (filePath) => {
+  try {
+    const ext = path.extname(filePath).toLowerCase();
+    
+    if (ext === '.docx') {
+      // Read the docx file
+      const content = fs.readFileSync(filePath, 'binary');
+      const zip = new PizZip(content);
+      const docXml = zip.files['word/document.xml'].asText();
+      
+      // Define patterns for Adobe Sign tags
+      const adobeSignPatterns = [
+        /\{sig_es_:signer\d+:signature\}/g,
+        /\{\*ES_:signer\d+:signature\}/g,
+        /\{Sig_es_:signer\d+:signature\}/g,
+        /\{esig_.*?:signer\d+\}/g,
+        /\{_es_:signer\d+.*?\}/g,
+        /\{signature_es.*?\}/g,
+        /\{initial_es.*?\}/g,
+        /\{signer\d+:signature\}/g,
+        /\{signer\d+:initial\}/g,
+        /\{signer\d+:date\}/g,
+        // Additional patterns for more flexibility
+        /\{[^{}]*es_[^{}]*\}/gi,     // Any tag containing 'es_'
+        /\{[^{}]*ES_[^{}]*\}/g,      // Any tag containing 'ES_'
+        /\{[^{}]*signature[^{}]*\}/gi, // Any tag containing 'signature'
+        /\{[^{}]*:signer\d+:[^{}]*\}/g // Any tag with signer format
+      ];
+      
+      // Check if any Adobe Sign pattern is found in the document
+      const foundTags = [];
+      let isAdobeSignDoc = false;
+      
+      for (const pattern of adobeSignPatterns) {
+        const matches = docXml.match(pattern);
+        if (matches && matches.length > 0) {
+          isAdobeSignDoc = true;
+          foundTags.push(...matches);
+        }
+      }
+      
+      if (isAdobeSignDoc && foundTags.length > 0) {
+        logger.info(`Found ${foundTags.length} Adobe Sign tags in document: ${foundTags.slice(0, 5).join(', ')}${foundTags.length > 5 ? '...' : ''}`);
+      }
+      
+      return isAdobeSignDoc;
+    } else if (ext === '.pdf') {
+      // For PDFs, check text content for tag patterns
+      // This is a simplistic approach - a more robust solution would use PDF parsing
+      try {
+        const pdfText = await extractTextFromPdf(filePath);
+        return pdfText.includes('{sig_es_:signer') || 
+               pdfText.includes('{*ES_:signer') ||
+               pdfText.includes('{signer:');
+      } catch (pdfError) {
+        logger.warn(`Error extracting text from PDF: ${pdfError.message}`);
+        // For PDF files, just return false as we can't detect tags reliably
+        return false;
+      }
+    }
+    
+    return false;
+  } catch (error) {
+    logger.warn(`Error checking for Adobe Sign tags: ${error.message}`);
+    return false;
+  }
+};
+
+/**
+ * Extract text from PDF for analysis
+ * @param {string} filePath - Path to PDF file
+ * @returns {Promise<string>} - Extracted text content
+ */
+const extractTextFromPdf = async (filePath) => {
+  try {
+    // This is a placeholder - in production, you would use a proper PDF parsing library
+    // such as pdf-parse or pdf.js
+    logger.info(`Extracting text from PDF: ${filePath}`);
+    
+    // For now, return empty string - in production implementation, this would extract actual text
+    return ''; 
+  } catch (error) {
+    logger.error(`Error extracting text from PDF: ${error.message}`);
+    return '';
+  }
+};
+
+/**
+ * Normalizes Adobe Sign tags in a document content
+ * Preserves double braces format for Adobe Sign tags ({{sig_es_:signer1:signature}})
+ * @param {string} content - The document content with Adobe Sign tags
+ * @returns {string} - Content with preserved Adobe Sign tags in double braces format
+ */
+const normalizeAdobeSignTags = (content) => {
+  if (!content || typeof content !== 'string') {
+    return content;
+  }
+  
+  // Convert single-brace Adobe Sign tags to double-brace format
+  const singleToDoubleMappings = [
+    // Signature fields
+    { pattern: /\{sig_es_:signer(\d+):signature\}/g, replacement: '{{sig_es_:signer$1:signature}}' },
+    { pattern: /\{\*ES_:signer(\d+):signature\}/g, replacement: '{{*ES_:signer$1:signature}}' },
+    { pattern: /\{Sig_es_:signer(\d+):signature\}/g, replacement: '{{Sig_es_:signer$1:signature}}' },
+    { pattern: /\{Sig_es_:signer(\d+)\}/g, replacement: '{{Sig_es_:signer$1}}' },
+    { pattern: /\{signer(\d+):signature\}/g, replacement: '{{signer$1:signature}}' },
+    
+    // Date fields
+    { pattern: /\{date_es_:signer(\d+):date\}/g, replacement: '{{date_es_:signer$1:date}}' },
+    
+    // Other common field types
+    { pattern: /\{text_es_:signer(\d+):(.*?)\}/g, replacement: '{{text_es_:signer$1:$2}}' },
+    { pattern: /\{initial_es_:signer(\d+):initials\}/g, replacement: '{{initial_es_:signer$1:initials}}' },
+    { pattern: /\{check_es_:signer(\d+):(.*?)\}/g, replacement: '{{check_es_:signer$1:$2}}' }
+  ];
+  
+  // Convert single-brace Adobe Sign tags to double-brace format
+  let normalizedContent = content;
+  
+  singleToDoubleMappings.forEach(mapping => {
+    normalizedContent = normalizedContent.replace(mapping.pattern, mapping.replacement);
+  });
+  
+  return normalizedContent;
+};
+
 module.exports = {
   processDocumentTemplate,
   processDocxTemplate,
@@ -736,5 +1155,10 @@ module.exports = {
   analyzeDocumentForSignatureFields,
   detectSignatureFields,
   detectExistingSignatureFields,
-  validateTemplateData
+  validateTemplateData,
+  processDocumentWithAdobeSignTags,
+  containsAdobeSignTags,
+  detectAdobeSignTags,
+  extractTextFromPdf,
+  normalizeAdobeSignTags
 };
