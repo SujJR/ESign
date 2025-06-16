@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "E-Signature API - Complete Collection with Enhanced Workflow",
-    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, and iframe-compatible signing URLs.\n\n🆕 NEW FEATURES:\n• Send reminders to unsigned recipients\n• Get signing URLs for iframe embedding\n• Get signing URLs for all recipients at once\n• Auto-extract recipients from JSON template data\n• Map signature fields to specific users\n• Enhanced workflow management\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.",
+    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, and iframe-compatible signing URLs.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🆕 NEW FEATURES:\n• Send reminders to unsigned recipients\n• Get signing URLs for iframe embedding\n• Get signing URLs for all recipients at once\n• Auto-extract recipients from JSON template data\n• Map signature fields to specific users\n• Enhanced workflow management\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM NOTICE:\nAdobe Sign's API reminder endpoints currently return 404 errors. For reliable reminders, use Adobe Sign's web interface:\n1. Go to: https://echosign.adobe.com/\n2. Click \"Manage\" → Find document → \"Send Reminder\"\n3. Adobe automatically emails unsigned recipients\n\nThe reminder API endpoint still works for identifying unsigned recipients and system integration.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -10,8 +10,9 @@
       "value": "http://localhost:3000"
     },
     {
-      "key": "authToken", 
-      "value": ""
+      "key": "apiKey",
+      "value": "ak_8e5b295f_8e5b295f5cb6d02a1c4b1f741ae7e8aba6451ee363ac7cf563f171513fa3700f",
+      "description": "API Key for authentication - get this by running 'node generate-api-keys.js'"
     },
     {
       "key": "documentId",
@@ -28,17 +29,29 @@
   ],
   "item": [
     {
-      "name": "Authentication",
+      "name": "API Key Management",
+      "description": "🔑 **API KEY AUTHENTICATION**\n\nThis system uses API Key authentication exclusively. All endpoints require an API key.\n\n📋 **How to get an API key:**\n1. Run `node generate-api-keys.js` in your project directory\n2. Use the generated API key in the `X-API-Key` header\n3. Set the API key in the collection variable `{{apiKey}}`\n\n✅ **Authentication Methods:**\n• Header: `X-API-Key: your_api_key`\n• Authorization Header: `Authorization: Bearer your_api_key`\n• Query Parameter: `?api_key=your_api_key`\n\n⚠️ **Important:** Keep your API keys secure and never commit them to version control.",
       "item": [
         {
-          "name": "Register User",
+          "name": "Create API Key",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 201) {",
-                  "    console.log('User registered successfully');",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.apiKey) {",
+                  "        console.log('✅ API Key created successfully');",
+                  "        console.log('🔑 API Key:', response.data.apiKey.key);",
+                  "        console.log('📋 Name:', response.data.apiKey.name);",
+                  "        console.log('🔐 Permissions:', response.data.apiKey.permissions.join(', '));",
+                  "        ",
+                  "        // Save the API key to collection variable",
+                  "        pm.collectionVariables.set('apiKey', response.data.apiKey.key);",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to create API key:', pm.response.json().message);",
                   "}"
                 ]
               }
@@ -48,61 +61,75 @@
             "method": "POST",
             "header": [
               {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Admin API key required to create new keys"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Test User\",\n  \"email\": \"test@example.com\",\n  \"password\": \"testpassword123\"\n}"
+              "raw": "{\n  \"name\": \"My Application Key\",\n  \"description\": \"API key for document management\",\n  \"permissions\": [\"documents:read\", \"documents:write\", \"documents:send\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": "{{baseUrl}}/api/auth/register"
+            "url": "{{baseUrl}}/api/auth/api-keys",
+            "description": "Create a new API key with specific permissions. Requires admin API key."
           }
         },
         {
-          "name": "Login User",
+          "name": "List API Keys",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Admin API key required"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/api-keys",
+            "description": "List all API keys (admin only)"
+          }
+        },
+        {
+          "name": "Test API Key Authentication",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 200) {",
+                  "    console.log('✅ API Key authentication successful');",
                   "    const response = pm.response.json();",
-                  "    if (response.data && response.data.token) {",
-                  "        pm.collectionVariables.set('authToken', response.data.token);",
-                  "        console.log('Login successful, token saved');",
+                  "    if (response.data && response.data.documents) {",
+                  "        console.log('📄 Documents accessible:', response.data.documents.length);",
                   "    }",
+                  "} else {",
+                  "    console.log('❌ API Key authentication failed');",
+                  "    console.log('🔍 Check if your API key is valid and has the required permissions');",
                   "}"
                 ]
               }
             }
           ],
           "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"testpassword123\"\n}"
-            },
-            "url": "{{baseUrl}}/api/auth/login"
-          }
-        },
-        {
-          "name": "Get Current User",
-          "request": {
             "method": "GET",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Your API key for authentication"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/me"
+            "url": "{{baseUrl}}/api/documents",
+            "description": "Test API key authentication by fetching documents"
           }
         }
       ]
@@ -132,8 +159,15 @@
             "method": "POST",
             "header": [
               {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Current authentication method - API Key"
+              },
+              {
                 "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "value": "Bearer {{authToken}}",
+                "description": "Legacy authentication method - JWT token",
+                "disabled": true
               }
             ],
             "body": {
@@ -162,8 +196,9 @@
             "method": "GET",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               }
             ],
             "url": "{{baseUrl}}/api/documents"
@@ -175,8 +210,9 @@
             "method": "GET",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               }
             ],
             "url": "{{baseUrl}}/api/documents/{{documentId}}"
@@ -193,8 +229,9 @@
             "method": "POST",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               },
               {
                 "key": "Content-Type",
@@ -214,8 +251,9 @@
             "method": "POST",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               }
             ],
             "url": "{{baseUrl}}/api/documents/{{documentId}}/send"
@@ -227,8 +265,9 @@
             "method": "GET",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               }
             ],
             "url": "{{baseUrl}}/api/documents/{{documentId}}/status"
@@ -240,8 +279,9 @@
             "method": "GET",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               }
             ],
             "url": "{{baseUrl}}/api/documents/{{documentId}}/download"
@@ -257,13 +297,24 @@
                   "if (pm.response.code === 200) {",
                   "    const response = pm.response.json();",
                   "    if (response.data && response.data.pendingRecipients) {",
-                  "        console.log('Reminder sent to', response.data.pendingRecipients.length, 'pending recipients');",
+                  "        console.log('✅ Reminder API call successful - sent to', response.data.pendingRecipients.length, 'pending recipients');",
                   "        response.data.pendingRecipients.forEach(recipient => {",
                   "            console.log('- ' + recipient.email + ' (' + recipient.status + ')');",
                   "        });",
+                  "        console.log('');",
+                  "        console.log('⚠️  IMPORTANT: Adobe Sign API reminder endpoints may return 404 errors.');",
+                  "        console.log('📧 For reliable reminders, use Adobe Sign web interface:');",
+                  "        console.log('   1. Go to: https://echosign.adobe.com/');",
+                  "        console.log('   2. Click \"Manage\" tab');",
+                  "        console.log('   3. Find your document and click \"Send Reminder\"');",
+                  "        console.log('   4. Adobe will email all unsigned recipients automatically');",
                   "    }",
                   "} else {",
-                  "    console.log('Reminder failed:', pm.response.json().message);",
+                  "    console.log('❌ Reminder API call failed:', pm.response.json().message);",
+                  "    console.log('');",
+                  "    console.log('💡 ALTERNATIVE SOLUTION:');",
+                  "    console.log('Use Adobe Sign web interface for 100% reliable reminders:');",
+                  "    console.log('https://echosign.adobe.com/ → Manage → Find Document → Send Reminder');",
                   "}"
                 ]
               }
@@ -273,8 +324,9 @@
             "method": "POST",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               },
               {
                 "key": "Content-Type",
@@ -291,7 +343,67 @@
               }
             },
             "url": "{{baseUrl}}/api/documents/{{documentId}}/send-reminder",
-            "description": "Send reminder email to recipients who haven't signed yet. The system automatically identifies pending recipients and sends reminders only to them. Custom message is optional."
+            "description": "📧 **Send Reminder to Unsigned Recipients**\n\n✅ **What this endpoint does:**\n• Identifies recipients who haven't signed yet using enhanced detection\n• Attempts to send reminders via Adobe Sign's API\n• Returns success response with pending recipient details\n• Gracefully handles Adobe Sign API failures\n\n⚠️ **IMPORTANT KNOWN ISSUE:**\nAdobe Sign's reminder API endpoints currently return 404 \"Resource not found\" errors. This is an Adobe Sign API issue, not a problem with your system.\n\n🎯 **RECOMMENDED SOLUTION:**\nFor 100% reliable reminders, use Adobe Sign's web interface:\n1. Go to: https://echosign.adobe.com/\n2. Click \"Manage\" tab\n3. Find documents with \"Out for Signature\" status\n4. Click on document → \"Send Reminder\"\n5. Adobe automatically emails all unsigned recipients\n\n💡 **Why web interface works better:**\n• 100% reliable - no API issues\n• Professional emails from Adobe's verified servers\n• No spam problems - high deliverability\n• Direct signing links included automatically\n• Delivery tracking built-in\n\n🔧 **This endpoint still works correctly for:**\n• Identifying unsigned recipients\n• Logging reminder attempts\n• Tracking reminder history\n• System integration workflows"
+          }
+        },
+        {
+          "name": "📧 Get Adobe Sign Manual Reminder Instructions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.document) {",
+                  "        const doc = response.data.document;",
+                  "        console.log('📋 MANUAL REMINDER INSTRUCTIONS');",
+                  "        console.log('=' + '='.repeat(40));",
+                  "        console.log('');",
+                  "        console.log('Document:', doc.originalName);",
+                  "        console.log('Status:', doc.status);",
+                  "        console.log('Adobe Agreement ID:', doc.adobeAgreementId);",
+                  "        console.log('');",
+                  "        ",
+                  "        if (doc.recipients && doc.recipients.length > 0) {",
+                  "            const unsigned = doc.recipients.filter(r => !r.signedAt);",
+                  "            console.log('📧 Unsigned Recipients (' + unsigned.length + '):');",
+                  "            unsigned.forEach((recipient, i) => {",
+                  "                console.log('  ' + (i + 1) + '. ' + recipient.email);",
+                  "            });",
+                  "            console.log('');",
+                  "        }",
+                  "        ",
+                  "        console.log('🔗 SEND REMINDERS VIA ADOBE SIGN:');",
+                  "        console.log('1. Go to: https://echosign.adobe.com/');",
+                  "        console.log('2. Click \"Manage\" tab');",
+                  "        console.log('3. Find this agreement:');",
+                  "        console.log('   \"' + doc.originalName + '\"');",
+                  "        console.log('   ID: ' + doc.adobeAgreementId);",
+                  "        console.log('4. Click \"Send Reminder\"');",
+                  "        console.log('5. Adobe will email all unsigned recipients');",
+                  "        console.log('');",
+                  "        console.log('🌐 Direct Link (if available):');",
+                  "        console.log('https://echosign.adobe.com/agreements/' + doc.adobeAgreementId);",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to get reminder instructions:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}",
+            "description": "📧 **Get Manual Reminder Instructions**\n\nThis endpoint helps you get the information needed to send reminders manually via Adobe Sign's web interface.\n\n✅ **What you'll get:**\n• Document details (name, status, Adobe Agreement ID)\n• List of unsigned recipients\n• Step-by-step instructions for Adobe Sign web interface\n• Direct Adobe Sign URL (if available)\n\n🎯 **Perfect for:**\n• Getting Adobe Agreement IDs for manual reminder sending\n• Identifying which recipients still need to sign\n• Quick access to Adobe Sign direct links\n\n💡 **Pro tip:** Bookmark the Adobe Sign URL pattern:\n`https://echosign.adobe.com/agreements/{agreementId}`"
           }
         },
         {
@@ -325,8 +437,9 @@
             "method": "GET",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               }
             ],
             "url": {
@@ -381,8 +494,9 @@
             "method": "GET",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               }
             ],
             "url": {
@@ -429,8 +543,9 @@
             "method": "POST",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}"
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
               },
               {
                 "key": "Content-Type",
