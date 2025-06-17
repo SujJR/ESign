@@ -16,6 +16,7 @@ const documentRoutes = require('./routes/document.routes');
 const logRoutes = require('./routes/log.routes');
 const apiKeyRoutes = require('./routes/apiKey.routes');
 const emailRoutes = require('./routes/email.routes');
+const webhookRoutes = require('./routes/webhook.routes');
 
 // Import middleware
 const errorMiddleware = require('./middleware/error');
@@ -50,7 +51,8 @@ app.get('/', (req, res) => {
       documents: '/api/documents',
       logs: '/api/logs',
       apiKeys: '/api/auth/api-keys',
-      email: '/api/email'
+      email: '/api/email',
+      webhooks: '/api/webhooks'
     },
     authInfo: {
       header: 'X-API-Key: your_api_key',
@@ -65,6 +67,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/auth/api-keys', apiKeyRoutes);
 app.use('/api/email', emailRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // Handle 404 errors - use a regular path instead of wildcard
 app.use((req, res, next) => {

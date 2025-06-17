@@ -221,10 +221,262 @@ const uploadTransientDocument = async (filePath) => {
   }
 };
 
+/**
+ * Send a reminder to all pending participants of an agreement
+ * @param {string} accessToken - Adobe Sign access token
+ * @param {string} agreementId - Adobe Sign agreement ID
+ * @param {string} message - Reminder message to send to participants
+ * @returns {Promise<Object>} - Adobe Sign API response
+ */
+const sendReminder = async (accessToken, agreementId, message = 'Please sign this document at your earliest convenience.') => {
+  try {
+    logger.info(`Sending reminder for agreement: ${agreementId}`);
+    
+    // Make sure we have the correct base URL
+    if (!adobeSignConfig.baseURL) {
+      await fetchApiAccessPoints();
+    }
+    
+    // Setup headers
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    };
+    
+    // Add API user email header if available
+    if (process.env.ADOBE_API_USER_EMAIL && process.env.ADOBE_API_USER_EMAIL !== 'your_email@example.com') {
+      headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
+    }
+    
+    // Prepare reminder data
+    const reminderData = {
+      status: 'ACTIVE',
+      recipientParticipantIds: [],  // Empty array means all pending participants
+      note: message
+    };
+    
+    // Send reminder request
+    const response = await axios.post(
+      `${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/reminders`,
+      reminderData,
+      { headers }
+    );
+    
+    logger.info(`Reminder sent successfully for agreement: ${agreementId}`);
+    return response.data;
+  } catch (error) {
+    logger.error(`Error sending reminder: ${error.message}`);
+    if (error.response) {
+      logger.error(`Adobe Sign API error: ${JSON.stringify(error.response.data)}`);
+    }
+    throw new Error(`Failed to send reminder: ${error.message}`);
+  }
+};
+
+/**
+ * Get information about an agreement
+ * @param {string} accessToken - Adobe Sign access token
+ * @param {string} agreementId - Adobe Sign agreement ID
+ * @returns {Promise<Object>} - Agreement information
+ */
+const getAgreementInfo = async (accessToken, agreementId) => {
+  try {
+    logger.info(`Getting agreement info for: ${agreementId}`);
+    
+    // Make sure we have the correct base URL
+    if (!adobeSignConfig.baseURL) {
+      await fetchApiAccessPoints();
+    }
+    
+    // Setup headers
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    };
+    
+    // Add API user email header if available
+    if (process.env.ADOBE_API_USER_EMAIL && process.env.ADOBE_API_USER_EMAIL !== 'your_email@example.com') {
+      headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
+    }
+    
+    // Get agreement info
+    const response = await axios.get(
+      `${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}`,
+      { headers }
+    );
+    
+    logger.info(`Successfully retrieved agreement info for: ${agreementId}`);
+    return response.data;
+  } catch (error) {
+    logger.error(`Error getting agreement info: ${error.message}`);
+    if (error.response) {
+      logger.error(`Adobe Sign API error: ${JSON.stringify(error.response.data)}`);
+    }
+    throw new Error(`Failed to get agreement info: ${error.message}`);
+  }
+};
+
+/**
+ * Get signing URL for a participant
+ * @param {string} accessToken - Adobe Sign access token
+ * @param {string} agreementId - Adobe Sign agreement ID
+ * @param {string} participantId - Participant ID
+ * @returns {Promise<Object>} - Signing URL info
+ */
+const getSigningUrl = async (accessToken, agreementId, participantId) => {
+  try {
+    logger.info(`Getting signing URL for participant ${participantId} in agreement: ${agreementId}`);
+    
+    // Make sure we have the correct base URL
+    if (!adobeSignConfig.baseURL) {
+      await fetchApiAccessPoints();
+    }
+    
+    // Setup headers
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    };
+    
+    // Add API user email header if available
+    if (process.env.ADOBE_API_USER_EMAIL && process.env.ADOBE_API_USER_EMAIL !== 'your_email@example.com') {
+      headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
+    }
+    
+    // Get signing URL
+    const response = await axios.get(
+      `${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/signingUrls?participantId=${participantId}`,
+      { headers }
+    );
+    
+    logger.info(`Successfully retrieved signing URL for participant: ${participantId}`);
+    return response.data;
+  } catch (error) {
+    logger.error(`Error getting signing URL: ${error.message}`);
+    if (error.response) {
+      logger.error(`Adobe Sign API error: ${JSON.stringify(error.response.data)}`);
+    }
+    throw new Error(`Failed to get signing URL: ${error.message}`);
+  }
+};
+
+/**
+ * Download a signed document from Adobe Sign
+ * @param {string} accessToken - Adobe Sign access token
+ * @param {string} agreementId - Adobe Sign agreement ID
+ * @returns {Promise<Buffer>} - Document file buffer
+ */
+const downloadSignedDocument = async (accessToken, agreementId) => {
+  try {
+    logger.info(`Downloading signed document for agreement: ${agreementId}`);
+    
+    // Make sure we have the correct base URL
+    if (!adobeSignConfig.baseURL) {
+      await fetchApiAccessPoints();
+    }
+    
+    // Setup headers
+    const headers = {
+      'Authorization': `Bearer ${accessToken}`
+    };
+    
+    // Add API user email header if available
+    if (process.env.ADOBE_API_USER_EMAIL && process.env.ADOBE_API_USER_EMAIL !== 'your_email@example.com') {
+      headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
+    }
+    
+    // Download document with responseType: arraybuffer to get binary data
+    const response = await axios.get(
+      `${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/documents/combined`,
+      { 
+        headers,
+        responseType: 'arraybuffer'
+      }
+    );
+    
+    logger.info(`Successfully downloaded signed document for agreement: ${agreementId}`);
+    return Buffer.from(response.data);
+  } catch (error) {
+    logger.error(`Error downloading signed document: ${error.message}`);
+    if (error.response) {
+      logger.error(`Adobe Sign API error: Status ${error.response.status}`);
+    }
+    throw new Error(`Failed to download signed document: ${error.message}`);
+  }
+};
+
+/**
+ * Creates a webhook with Adobe Sign
+ * @param {string} accessToken - Adobe Sign access token
+ * @param {string} webhookUrl - The URL to receive webhook events
+ * @param {string} [scope='ACCOUNT'] - Scope of the webhook (ACCOUNT, GROUP, USER)
+ * @returns {Promise<Object>} - Created webhook information
+ */
+const createWebhook = async (accessToken, webhookUrl, scope = 'ACCOUNT') => {
+  try {
+    logger.info(`Creating webhook with URL: ${webhookUrl}`);
+    
+    // Make sure we have the correct base URL
+    if (!adobeSignConfig.baseURL) {
+      await fetchApiAccessPoints();
+    }
+    
+    // Setup headers
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    };
+    
+    // Add API user email header if available
+    if (process.env.ADOBE_API_USER_EMAIL && process.env.ADOBE_API_USER_EMAIL !== 'your_email@example.com') {
+      headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
+    }
+    
+    // Define webhook configuration
+    const webhookConfig = {
+      name: 'ESignature_Status_Updates',
+      scope,
+      state: 'ACTIVE',
+      webhookSubscriptionEvents: [
+        'AGREEMENT_ACTION_COMPLETED',
+        'AGREEMENT_SIGNED',
+        'AGREEMENT_ACTION_DELEGATED',
+        'AGREEMENT_ACTION_DECLINED',
+        'AGREEMENT_EMAIL_VIEWED',
+        'AGREEMENT_ACTION_VIEWED'
+      ],
+      webhookUrlInfo: {
+        url: webhookUrl
+      }
+    };
+    
+    // Create webhook
+    const response = await axios.post(
+      `${adobeSignConfig.baseURL}api/rest/v6/webhooks`,
+      webhookConfig,
+      { headers }
+    );
+    
+    logger.info(`Successfully created webhook with ID: ${response.data.id}`);
+    return response.data;
+  } catch (error) {
+    logger.error(`Error creating webhook: ${error.message}`);
+    if (error.response) {
+      logger.error(`Adobe Sign API error: ${JSON.stringify(error.response.data)}`);
+    }
+    throw new Error(`Failed to create webhook: ${error.message}`);
+  }
+};
+
 module.exports = {
   adobeSignConfig,
   createAdobeSignClient,
   getAccessToken,
   fetchApiAccessPoints,
-  uploadTransientDocument
+  uploadTransientDocument,
+  sendReminder,
+  getAgreementInfo,
+  getSigningUrl,
+  downloadSignedDocument,
+  createWebhook
 };

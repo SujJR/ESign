@@ -57,7 +57,8 @@ const documentSchema = new mongoose.Schema(
         lastReminderSent: { type: Date, default: null },
         lastSigningUrlAccessed: { type: Date, default: null },
         signatureField: { type: String, default: null },
-        title: { type: String, default: null }
+        title: { type: String, default: null },
+        signingUrl: { type: String, default: null }
       }
     ],
     adobeMetadata: {

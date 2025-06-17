@@ -14,6 +14,9 @@ A Node.js REST API for electronic signatures using Adobe Sign API. This applicat
 - **📊 Bulk signing URL retrieval** - Get URLs for all recipients at once
 - **🧠 Enhanced template processing** - Intelligent DOCX template processing with error guidance
 - **⚡ Comprehensive workflow management** - Streamlined multi-recipient document workflows
+- **🔔 Webhook integration** - Real-time signature status updates via Adobe Sign webhooks
+- **⏱️ Automatic timestamp tracking** - Records exactly when each user signs documents
+- **🔄 Manual sync option** - Force status updates from Adobe Sign when needed
 
 ## Features
 
@@ -26,6 +29,8 @@ A Node.js REST API for electronic signatures using Adobe Sign API. This applicat
 - **🆕 Intelligent signature field mapping with auto-generation**
 - **🆕 Smart recipient prioritization (explicit recipients > individual fields)**
 - **🆕 Duplicate email prevention and deduplication**
+- **🆕 Real-time signature status updates via webhooks**
+- **🆕 Automatic tracking of signature timestamps**
 - Adobe Sign API integration for e-signatures
 - Bulk signing URL management for multiple recipients
 - Enhanced reminder system for unsigned recipients
@@ -143,6 +148,7 @@ npm start
 - `GET /api/documents/:id/signing-url` - **NEW** Get signing URL for iframe embedding *(requires `documents:read`)*
 - `GET /api/documents/:id/signing-urls` - **🆕 NEW** Get all signing URLs at once *(requires `documents:read`)*
 - `GET /api/documents/:id/status` - Check document status *(requires `documents:read`)*
+- `POST /api/documents/:id/update-status` - **🆕 NEW** Force update signature status *(requires `documents:write`)*
 - `GET /api/documents/:id/download` - Download document *(requires `documents:read`)*
 
 ### API Key Management (Requires Admin Access)
@@ -157,6 +163,10 @@ npm start
 ### Logs (Requires Log Access)
 - `GET /api/logs` - Get logs with pagination and filtering *(requires `logs:read`)*
 - `GET /api/logs/summary` - Get logs summary statistics *(requires `logs:read`)*
+
+### Webhooks (NEW)
+- `POST /api/webhooks/adobe-sign` - Receive webhook events from Adobe Sign *(no authentication)*
+- `POST /api/webhooks/setup` - Set up webhook with Adobe Sign *(requires `admin:all`)*
 
 ## ✨ New Endpoints for Enhanced Workflow Management
 
@@ -398,6 +408,43 @@ Enable enhanced positioning (default):
   "useAutoDetectedFields": true
 }
 ```
+
+## 🔔 Webhook Integration
+
+The application now supports Adobe Sign webhooks for automatic status updates:
+
+### Setting Up Webhooks
+
+1. Ensure your server is publicly accessible (or use a service like ngrok for testing)
+2. Configure the webhook URL in your `.env` file:
+   ```
+   ADOBE_WEBHOOK_URL=https://your-domain.com/api/webhooks/adobe-sign
+   ```
+3. Webhooks are automatically registered when sending documents for signature
+4. You can also manually set up webhooks with the API endpoint:
+   ```http
+   POST /api/webhooks/setup
+   Content-Type: application/json
+   X-API-Key: your_api_key
+   
+   {
+     "webhookUrl": "https://your-domain.com/api/webhooks/adobe-sign"
+   }
+   ```
+
+### Supported Events
+
+- Document signed (`AGREEMENT_ACTION_COMPLETED`, `AGREEMENT_SIGNED`)
+- Document viewed (`AGREEMENT_EMAIL_VIEWED`, `AGREEMENT_ACTION_VIEWED`)
+- Document declined (`AGREEMENT_ACTION_DECLINED`)
+- Signature delegated (`AGREEMENT_ACTION_DELEGATED`)
+
+### Status Updates
+
+When a user signs a document, the system automatically:
+1. Updates the document status based on all signatures
+2. Updates the individual recipient's status to "signed"
+3. Records the exact timestamp when the signature occurred
 
 ## License
 

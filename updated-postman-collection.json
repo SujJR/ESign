@@ -1,0 +1,635 @@
+{
+  "info": {
+    "name": "E-Signature API - Complete Collection with Enhanced Workflow",
+    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, iframe-compatible signing URLs, and webhook integration.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🆕 NEW FEATURES:\n• Send reminders to unsigned recipients\n• Get signing URLs for iframe embedding\n• Get signing URLs for all recipients at once\n• Auto-extract recipients from JSON template data\n• Map signature fields to specific users\n• Enhanced workflow management\n• Real-time status updates via webhooks\n• Manual signature status synchronization\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM NOTICE:\nAdobe Sign's API reminder endpoints currently return 404 errors. For reliable reminders, use Adobe Sign's web interface:\n1. Go to: https://echosign.adobe.com/\n2. Click \"Manage\" → Find document → \"Send Reminder\"\n3. Adobe automatically emails unsigned recipients\n\nThe reminder API endpoint still works for identifying unsigned recipients and system integration.\n\n🔔 WEBHOOK INTEGRATION:\nThis API now supports Adobe Sign webhooks for real-time status updates. Set up webhooks to automatically update signature status and timestamps when documents are signed.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "apiKey",
+      "value": "ak_8e5b295f_8e5b295f5cb6d02a1c4b1f741ae7e8aba6451ee363ac7cf563f171513fa3700f",
+      "description": "API Key for authentication - get this by running 'node generate-api-keys.js'"
+    },
+    {
+      "key": "documentId",
+      "value": ""
+    },
+    {
+      "key": "signingUrl",
+      "value": ""
+    },
+    {
+      "key": "recipientEmail",
+      "value": "john.smith@example.com"
+    },
+    {
+      "key": "webhookUrl",
+      "value": "https://your-domain.com/api/webhooks/adobe-sign",
+      "description": "The URL where Adobe Sign will send webhook events"
+    }
+  ],
+  "item": [
+    {
+      "name": "API Key Management",
+      "description": "🔑 **API KEY AUTHENTICATION**\n\nThis system uses API Key authentication exclusively. All endpoints require an API key.\n\n📋 **How to get an API key:**\n1. Run `node generate-api-keys.js` in your project directory\n2. Use the generated API key in the `X-API-Key` header\n3. Set the API key in the collection variable `{{apiKey}}`\n\n✅ **Authentication Methods:**\n• Header: `X-API-Key: your_api_key`\n• Authorization Header: `Authorization: Bearer your_api_key`\n• Query Parameter: `?api_key=your_api_key`\n\n⚠️ **Important:** Keep your API keys secure and never commit them to version control.",
+      "item": [
+        {
+          "name": "Create API Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.apiKey) {",
+                  "        console.log('✅ API Key created successfully');",
+                  "        console.log('🔑 API Key:', response.data.apiKey.key);",
+                  "        console.log('📋 Name:', response.data.apiKey.name);",
+                  "        console.log('🔐 Permissions:', response.data.apiKey.permissions.join(', '));",
+                  "        ",
+                  "        // Save the API key to collection variable",
+                  "        pm.collectionVariables.set('apiKey', response.data.apiKey.key);",
+                  "        ",
+                  "        pm.test('API key created successfully', function() {",
+                  "            pm.expect(response.data.apiKey).to.have.property('key');",
+                  "            pm.expect(response.data.apiKey).to.have.property('name');",
+                  "            pm.expect(response.data.apiKey).to.have.property('permissions');",
+                  "        });",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Development API Key\",\n  \"permissions\": [\"documents:read\", \"documents:write\", \"documents:send\", \"admin:all\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/auth/api-keys"
+          },
+          "response": []
+        },
+        {
+          "name": "Get API Keys",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/api-keys"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete API Key",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/api-keys/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "api-keys", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "64a1b2c3d4e5f6g7h8i9j0k"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Document Management",
+      "description": "📄 **DOCUMENT MANAGEMENT**\n\nManage your documents for e-signature. Upload, prepare, send for signature, and track status.\n\n📋 **Workflow Overview:**\n1. Upload a document (`POST /api/documents/upload`)\n2. Prepare it for signature (`POST /api/documents/:id/prepare`)\n3. Send it for signature (`POST /api/documents/:id/send`)\n4. Get signing URLs (`GET /api/documents/:id/signing-url`)\n5. Check status (`GET /api/documents/:id/status`)\n6. Download signed document (`GET /api/documents/:id/download`)\n\n✨ **Advanced Features:**\n• Upload with template data for field replacement\n• Automated signature field positioning\n• Support for multiple signers with ordering\n• Real-time status updates via webhooks\n• Manual status synchronization",
+      "item": [
+        {
+          "name": "Upload Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "document",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/documents/upload"
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Document with JSON Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "document",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "data",
+                  "type": "file",
+                  "src": "",
+                  "description": "JSON file with template data"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/documents/upload-with-data"
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Document from URL with JSON Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/path/to/document.pdf\",\n  \"filename\": \"custom_filename.pdf\",\n  \"templateData\": {\n    \"clientName\": \"John Smith\",\n    \"clientEmail\": \"john.smith@example.com\",\n    \"clientTitle\": \"CEO\",\n    \"companyName\": \"Acme Inc.\",\n    \"projectName\": \"Website Redesign\",\n    \"startDate\": \"2023-06-15\",\n    \"endDate\": \"2023-08-15\",\n    \"totalAmount\": \"$5,000\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/documents/upload-from-url"
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Document from URL with inline JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/path/to/document.pdf\",\n  \"filename\": \"custom_filename.pdf\",\n  \"templateData\": {\n    \"clientName\": \"John Smith\",\n    \"clientEmail\": \"john.smith@example.com\",\n    \"clientTitle\": \"CEO\",\n    \"companyName\": \"Acme Inc.\",\n    \"projectName\": \"Website Redesign\",\n    \"startDate\": \"2023-06-15\",\n    \"endDate\": \"2023-08-15\",\n    \"totalAmount\": \"$5,000\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/documents/upload-from-url"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Documents",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Document Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Prepare Document for Signature",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipients\": [\n    {\n      \"name\": \"John Smith\",\n      \"email\": \"john.smith@example.com\",\n      \"order\": 1\n    },\n    {\n      \"name\": \"Jane Doe\",\n      \"email\": \"jane.doe@example.com\",\n      \"order\": 2\n    }\n  ],\n  \"signatureFields\": {\n    \"john.smith@example.com\": \"signature1\",\n    \"jane.doe@example.com\": \"signature2\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/prepare"
+          },
+          "response": []
+        },
+        {
+          "name": "Send for Signature",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/send"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Signing URL",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/{{documentId}}/signing-url?email={{recipientEmail}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "documents", "{{documentId}}", "signing-url"],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "{{recipientEmail}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Signing URLs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/signing-urls"
+          },
+          "response": []
+        },
+        {
+          "name": "Check Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/status"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Signature Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/update-status",
+            "description": "🔄 **Force Update**: Manually check and update the signature status of a document by querying Adobe Sign API.\n\n✅ **Key Features**:\n• Retrieves the latest status from Adobe Sign\n• Updates document status (completed, cancelled, expired, etc.)\n• Updates each recipient's status (signed, pending, declined, etc.)\n• Updates signedAt timestamps for recipients who have signed\n\n⏱️ **When to use**:\n• As a fallback if webhooks fail\n• To manually sync status after network issues\n• When troubleshooting signature workflow problems\n\n📋 **Response includes**:\n• Updated document status\n• Updated recipient statuses\n• Signature timestamps"
+          },
+          "response": []
+        },
+        {
+          "name": "Download Document",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/download"
+          },
+          "response": []
+        },
+        {
+          "name": "Send Reminder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emailMessage\": \"This is a friendly reminder to sign the document.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/send-reminder"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Enhanced Document Management",
+      "description": "📄 **ENHANCED DOCUMENT WORKFLOWS**\n\nAdvanced document workflows with intelligent field detection and automated recipient mapping.\n\n✨ **Key Features:**\n• Intelligent field detection\n• Automated recipient extraction from template data\n• Dynamic signature field mapping\n• Support for structured document templates\n\n📋 **Best Practices:**\n• Include a recipients array in your JSON template data\n• Use consistent naming for signature fields\n• Provide email addresses for all signers\n• Follow the recommended order of operations",
+      "item": [
+        {
+          "name": "🆕 Prepare Document with JSON Recipients (Auto-Mapping)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"useIntelligentPositioning\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/{{documentId}}/prepare",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "documents", "{{documentId}}", "prepare"]
+            },
+            "description": "🚀 **Enhanced Auto-Extraction**: Automatically extracts recipients from uploaded JSON template data and generates signature field mapping dynamically.\n\n✨ **New Dynamic Features**:\n• Auto-extracts recipients from JSON `recipients` array\n• Auto-generates signature field mapping from recipient emails and signatureField properties\n• Only includes people intended for signatures (ignores project managers, approvers, etc.)\n• No manual mapping required!\n\n📋 **How it works**:\n1. Reads the `recipients` array from your uploaded JSON template data\n2. Extracts only the people meant to sign (not project managers, etc.)\n3. Automatically creates signature field mapping using their emails and signatureField values\n4. Prepares document for signature with intelligent positioning\n\n🎯 **Expected JSON structure**:\n```json\n{\n  \"recipients\": [\n    {\n      \"name\": \"John Smith\",\n      \"email\": \"john.smith@example.com\",\n      \"title\": \"CEO\",\n      \"signatureField\": \"clientSignature\"\n    }\n  ]\n}\n```\n\n⚡ **No manual work needed** - just upload your JSON with recipients and call this endpoint!"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Logs",
+      "description": "📝 **LOGS**\n\nView logs for debugging and monitoring purposes.\n\n✅ **Key Features:**\n• View all logs\n• Filter logs by level (info, error, etc.)\n• Filter logs by document ID\n• Filter logs by date range",
+      "item": [
+        {
+          "name": "Get All Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/logs"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Logs by Level",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/logs?level=error",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "logs"],
+              "query": [
+                {
+                  "key": "level",
+                  "value": "error"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Email Management",
+      "description": "📧 **EMAIL MANAGEMENT**\n\nManage email templates and send emails to users.\n\n✅ **Key Features:**\n• Send email to recipients\n• Send test emails\n• Customize email templates\n• HTML and text email support",
+      "item": [
+        {
+          "name": "Send Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"recipient@example.com\",\n  \"subject\": \"Test Email\",\n  \"text\": \"This is a test email\",\n  \"html\": \"<p>This is a <strong>test</strong> email</p>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/email/send"
+          },
+          "response": []
+        },
+        {
+          "name": "Send Test Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/email/test"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "description": "🔔 **WEBHOOK INTEGRATION**\n\nWebhooks enable real-time updates when documents are signed, viewed, or declined. Configure Adobe Sign to send events to your application.\n\n📋 **Key Features:**\n• Automatic status updates when documents are signed\n• Real-time tracking of document views and interactions\n• Automatic timestamp recording when signatures are completed\n• Support for signature delegation and declining\n\n✅ **Supported Events:**\n• Document signed\n• Document viewed\n• Document declined\n• Signature delegated to another person\n\n⚠️ **Important:** For webhooks to work, your server must be publicly accessible or use a secure tunnel service like ngrok.",
+      "item": [
+        {
+          "name": "Setup Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"webhookUrl\": \"{{webhookUrl}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/webhooks/setup",
+            "description": "🔧 **Setup Adobe Sign Webhook**: Configure Adobe Sign to send events to your application when documents are signed, viewed, or declined.\n\n✅ **Key Features**:\n• Registers your webhook URL with Adobe Sign\n• Configures event types to be received (signing, viewing, declining)\n• Activates the webhook immediately\n\n📋 **Required Parameters**:\n• `webhookUrl`: The full URL where Adobe Sign should send events (must be publicly accessible)\n\n⚠️ **Important**: Your server must be publicly accessible for webhooks to work. If testing locally, use a service like ngrok to create a secure tunnel."
+          },
+          "response": []
+        },
+        {
+          "name": "Test Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"AGREEMENT_ACTION_COMPLETED\",\n  \"agreement\": {\n    \"id\": \"test-agreement-id\",\n    \"name\": \"Test Agreement\",\n    \"status\": \"SIGNED\"\n  },\n  \"participant\": {\n    \"email\": \"{{recipientEmail}}\",\n    \"name\": \"Test User\",\n    \"status\": \"SIGNED\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/webhooks/adobe-sign",
+            "description": "🧪 **Test Webhook Reception**: Send a simulated Adobe Sign event to test your webhook handling.\n\n✅ **Key Features**:\n• Simulates a document signing event\n• Tests your webhook handler's response\n• No authentication required (Adobe Sign doesn't authenticate)\n\n📋 **Customizable Parameters**:\n• `event`: The type of event (AGREEMENT_ACTION_COMPLETED, AGREEMENT_SIGNED, etc.)\n• `agreement`: Information about the signed document\n• `participant`: Information about the signer\n\n⚠️ **Note**: This endpoint is for testing only. In production, Adobe Sign will call this endpoint automatically when events occur."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

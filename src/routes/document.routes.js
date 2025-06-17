@@ -1,6 +1,6 @@
 const express = require('express');
 const documentController = require('../controllers/document.controller');
-const { uploadDocument, uploadDocumentWithData, handleMulterErrors } = require('../middleware/upload');
+const { uploadDocument, uploadDocumentWithData, uploadDocumentFromUrl, handleMulterErrors } = require('../middleware/upload');
 const { authenticateApiKey, requirePermissions } = require('../middleware/apiKeyAuth');
 
 const router = express.Router();
@@ -14,6 +14,13 @@ router.post('/upload', requirePermissions(['documents:write', 'admin:all']), upl
 // Upload document with JSON data for template processing
 router.post('/upload-with-data', requirePermissions(['documents:write', 'admin:all']), uploadDocumentWithData, handleMulterErrors, documentController.uploadDocumentWithData);
 
+// Upload document from URL with JSON data
+router.post('/upload-from-url', 
+  requirePermissions(['documents:write', 'admin:all']), 
+  uploadDocumentFromUrl,
+  handleMulterErrors, 
+  documentController.uploadDocumentFromUrl);
+
 // Get all documents for user
 router.get('/', requirePermissions(['documents:read', 'admin:all']), documentController.getDocuments);
 
@@ -26,12 +33,6 @@ router.post('/:id/prepare', requirePermissions(['documents:write', 'admin:all'])
 // Send document for signature
 router.post('/:id/send', requirePermissions(['documents:send', 'admin:all']), documentController.sendForSignature);
 
-// Send document for signature using two-step approach
-router.post('/:id/send-two-step', requirePermissions(['documents:send', 'admin:all']), documentController.sendForSignatureTwoStep);
-
-// Send document for signature using comprehensive approach with multiple fallbacks
-router.post('/:id/send-comprehensive', requirePermissions(['documents:send', 'admin:all']), documentController.sendForSignatureComprehensive);
-
 // Send reminder to recipients who haven't signed yet
 router.post('/:id/send-reminder', requirePermissions(['documents:send', 'admin:all']), documentController.sendReminder);
 
@@ -43,6 +44,9 @@ router.get('/:id/signing-urls', requirePermissions(['documents:read', 'admin:all
 
 // Check document status
 router.get('/:id/status', requirePermissions(['documents:read', 'admin:all']), documentController.checkDocumentStatus);
+
+// Update signature status
+router.post('/:id/update-status', requirePermissions(['documents:write', 'admin:all']), documentController.updateSignatureStatus);
 
 // Download document
 router.get('/:id/download', requirePermissions(['documents:read', 'admin:all']), documentController.downloadDocument);

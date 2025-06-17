@@ -2,6 +2,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { ApiError } = require('../utils/apiUtils');
+const logger = require('../utils/logger');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -56,6 +57,58 @@ exports.uploadDocumentWithData = upload.fields([
   { name: 'documents', maxCount: 1 }, // Support both singular and plural
   { name: 'data', maxCount: 1 }
 ]);
+
+// Middleware for document with multiple JSON data files
+exports.uploadDocumentWithMultipleData = upload.fields([
+  { name: 'document', maxCount: 1 },
+  { name: 'documents', maxCount: 1 }, // Support both singular and plural
+  { name: 'data', maxCount: 10 } // Allow up to 10 JSON files
+]);
+
+// Configure multer for document upload from URL with JSON data
+const uploadFromUrl = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    // Only allow JSON files for this endpoint
+    if (file.mimetype === 'application/json') {
+      cb(null, true);
+    } else {
+      cb(new ApiError(400, 'Only JSON files are allowed for this endpoint'), false);
+    }
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB for JSON files
+  }
+}).fields([
+  { name: 'jsonData', maxCount: 10 } // Allow up to 10 JSON files
+]);
+
+// Middleware for document upload from URL with JSON data
+exports.uploadDocumentFromUrl = uploadFromUrl;
+
+// Validate URL middleware
+exports.validateUrl = (req, res, next) => {
+  const { documentUrl } = req.body;
+  
+  if (!documentUrl) {
+    return next(new ApiError(400, 'Document URL is required'));
+  }
+  
+  try {
+    const url = new URL(documentUrl);
+    // Check for http or https protocol
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return next(new ApiError(400, 'Invalid URL protocol. Only HTTP and HTTPS are supported'));
+    }
+    
+    // Store validated URL in request
+    req.documentUrl = documentUrl;
+    next();
+  } catch (error) {
+    logger.error(`Invalid URL provided: ${error.message}`);
+    return next(new ApiError(400, 'Invalid URL format'));
+  }
+};
 
 // Middleware for handling multer errors
 exports.handleMulterErrors = (err, req, res, next) => {
