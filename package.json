@@ -8,7 +8,18 @@
     "dev": "nodemon src/server.js",
     "generate-keys": "node generate-api-keys.js",
     "migrate": "node migrate-to-api-keys.js",
-    "test-auth": "node test-api-key-auth.js"
+    "test-auth": "node test-api-key-auth.js",
+    "test-webhook": "node test-webhook-patch.js",
+    "test-enhanced-client": "node test-enhanced-client.js",
+    "test-signature-recovery": "node test-signature-recovery.js",
+    "test-comprehensive": "node test-comprehensive-recovery.js",
+    "test-fix": "node test-comprehensive-fix.js",
+    "verify-documents": "node verify-document-status.js",
+    "recover-documents": "node recover-documents.js",
+    "test-final": "node test-final-fix.js",
+    "test-solution": "node test-final-solution.js",
+    "test-enhanced": "node test-enhanced-signature.js",
+    "test-enhanced-features": "node test-enhanced-features.js"
   },
   "keywords": [],
   "author": "",
@@ -16,14 +27,17 @@
   "description": "",
   "dependencies": {
     "axios": "^1.9.0",
+    "axios-retry": "^4.5.0",
     "cors": "^2.8.5",
     "docxtemplater": "^3.63.2",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "form-data": "^4.0.3",
+    "jszip": "^3.10.1",
     "libreoffice-convert": "^1.6.1",
     "mammoth": "^1.9.1",
     "mime": "^4.0.7",
+    "mime-types": "^3.0.1",
     "mongoose": "^8.15.1",
     "morgan": "^1.10.0",
     "multer": "^2.0.1",
@@ -31,8 +45,13 @@
     "nodemailer": "^7.0.3",
     "nodemon": "^3.1.10",
     "pdf-lib": "^1.17.1",
+    "pdf-parse": "^1.1.1",
     "pdf2pic": "^3.2.0",
     "pizzip": "^3.2.0",
-    "winston": "^3.17.0"
+    "winston": "^3.17.0",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "glob": "^11.0.3"
   }
 }

@@ -13,6 +13,7 @@ const connectDB = require('./config/db');
 
 // Import routes
 const documentRoutes = require('./routes/document.routes');
+const enhancedRoutes = require('./routes/enhanced.routes');
 const logRoutes = require('./routes/log.routes');
 const apiKeyRoutes = require('./routes/apiKey.routes');
 const emailRoutes = require('./routes/email.routes');
@@ -29,6 +30,42 @@ const app = express();
 // Connect to MongoDB
 connectDB();
 
+// Monkey patch the missing createWebhook function
+// This ensures it's available for modules that try to import it from adobeSign.js
+try {
+  const adobeSign = require('./config/adobeSign');
+  const createWebhook = require('./config/createWebhook');
+  
+  // Only add if it doesn't already exist
+  if (!adobeSign.createWebhook) {
+    adobeSign.createWebhook = createWebhook;
+    logger.info('Successfully added missing createWebhook function to adobeSign module');
+  }
+} catch (error) {
+  logger.error(`Error patching createWebhook function: ${error.message}`);
+}
+
+// Apply direct fix for socket hang up in document controller
+try {
+  // Apply direct intercept first - this is the most critical fix
+  const applyDirectIntercept = require('./utils/directDocumentIntercept');
+  applyDirectIntercept();
+  logger.info('Applied direct intercept for socket hang up in document controller');
+  
+  // Apply other fixes as backups
+  const applyDocumentControllerFix = require('./utils/documentControllerFix');
+  applyDocumentControllerFix();
+  logger.info('Applied backup fix for socket hang up in document controller');
+  
+  // Apply enhanced form fields fix
+  const enhanceAdobeSignFormFields = require('./utils/enhanceAdobeSignFormFields');
+  const adobeSignFormFields = require('./utils/adobeSignFormFields');
+  enhanceAdobeSignFormFields(adobeSignFormFields);
+  logger.info('Applied enhanced form fields fix for socket hang up issues');
+} catch (error) {
+  logger.error(`Error applying socket hang up fixes: ${error.message}`);
+}
+
 // Create logs directory if it doesn't exist
 const logsDir = path.join(__dirname, '../logs');
 if (!fs.existsSync(logsDir)) {
@@ -41,6 +78,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(logger.morganMiddleware);
 
+// Add socket hang up interceptor middleware
+const socketHangUpInterceptor = require('./middleware/socketHangUpInterceptor');
+app.use(socketHangUpInterceptor);
+logger.info('Added global socket hang up interceptor middleware');
+
 // Basic route
 app.get('/', (req, res) => {
   res.json({
@@ -49,6 +91,7 @@ app.get('/', (req, res) => {
     authentication: 'API Key required',
     endpoints: {
       documents: '/api/documents',
+      enhanced: '/api/enhanced', 
       logs: '/api/logs',
       apiKeys: '/api/auth/api-keys',
       email: '/api/email',
@@ -64,6 +107,7 @@ app.get('/', (req, res) => {
 
 // API routes
 app.use('/api/documents', documentRoutes);
+app.use('/api/enhanced', enhancedRoutes);
 app.use('/api/logs', logRoutes);
 app.use('/api/auth/api-keys', apiKeyRoutes);
 app.use('/api/email', emailRoutes);

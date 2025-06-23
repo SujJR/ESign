@@ -1,12 +1,29 @@
 /**
  * Standard API response format
- * @param {number} statusCode - HTTP status code
- * @param {string} message - Response message
- * @param {any} data - Response data
+ * @param {number|string} statusCodeOrMessage - HTTP status code or message if first parameter
+ * @param {string|any} messageOrData - Response message or data if message was first param
+ * @param {any|boolean} dataOrIsError - Response data or isError flag
  * @returns {object} - Formatted response object
  */
-exports.formatResponse = (statusCode, message, data = null) => {
-  const success = statusCode >= 200 && statusCode < 400;
+exports.formatResponse = (statusCodeOrMessage, messageOrData = null, dataOrIsError = null) => {
+  // Handle different calling patterns
+  let statusCode, message, data, isError = false;
+  
+  // Check if the first parameter is a number (status code) or a string (message)
+  if (typeof statusCodeOrMessage === 'number') {
+    // Original format: (statusCode, message, data)
+    statusCode = statusCodeOrMessage;
+    message = messageOrData;
+    data = dataOrIsError;
+  } else {
+    // Alternative format: (message, data, isError)
+    message = statusCodeOrMessage;
+    data = messageOrData;
+    isError = dataOrIsError === true;
+    statusCode = isError ? 400 : 200; // Default status codes
+  }
+  
+  const success = !isError && statusCode >= 200 && statusCode < 400;
   
   return {
     success,

@@ -883,7 +883,35 @@ const createAgreementWithBestApproach = async (transientDocumentId, recipients, 
         };
       } catch (textTagError) {
         logger.error(`Text tag approach failed: ${textTagError.message}`);
-        throw new Error(`Failed to create agreement with text tags: ${textTagError.message}`);
+        
+        // If it's a socket hang up error, try the socket-protected approach
+        if (textTagError.message && textTagError.message.includes('socket hang up')) {
+          logger.info('Attempting socket-protected fallback for text tags approach');
+          try {
+            // Use socket protected agreement creation
+            const { createAgreementWithSocketProtection } = require('../config/socketProtectedAgreement');
+            const result = await createAgreementWithSocketProtection(transientDocumentId, recipients, documentName, {
+              signingFlow,
+              message: 'Please sign this document with text tags'
+            });
+            
+            // Check if the socket protection returned a valid agreement
+            if (result.id) {
+              return {
+                agreementId: result.id,
+                method: 'socket-protected-text-tags',
+                success: true,
+                message: 'Agreement created using socket-protected fallback for text tags'
+              };
+            }
+          } catch (socketError) {
+            // Log but continue to next approach
+            logger.error(`Socket-protected fallback also failed: ${socketError.message}`);
+          }
+        }
+        
+        // If we reach here, text tag approach and socket-protected fallback both failed
+        // Continue to basic approach
       }
     }
     
@@ -899,6 +927,78 @@ const createAgreementWithBestApproach = async (transientDocumentId, recipients, 
       };
     } catch (basicError) {
       logger.error(`Basic agreement approach failed: ${basicError.message}`);
+      
+      // If it's a socket hang up error, try the socket-protected approach
+      if (basicError.message && (
+        basicError.message.includes('socket hang up') || 
+        basicError.message.includes('timeout') ||
+        basicError.message.includes('network error') ||
+        basicError.message.includes('ETIMEDOUT') ||
+        basicError.message.includes('ECONNRESET')
+      )) {
+        logger.info('Attempting socket-protected fallback for basic agreement approach');
+        try {
+          // Use socket protected agreement creation
+          const { createAgreementWithSocketProtection } = require('../config/socketProtectedAgreement');
+          const result = await createAgreementWithSocketProtection(transientDocumentId, recipients, documentName, {
+            signingFlow,
+            message: 'Please sign this document'
+          });
+          
+          // Check if the socket protection returned a valid agreement
+          if (result.id) {
+            return {
+              agreementId: result.id,
+              method: 'socket-protected-basic',
+              success: true,
+              message: 'Agreement created using socket-protected fallback for basic approach'
+            };
+          } else if (result.status === 'PENDING_VERIFICATION') {
+            // Return a special result for pending verification
+            return {
+              agreementId: `pending-${Date.now()}`,
+              method: 'socket-protected-pending',
+              success: true,
+              pendingVerification: true,
+              message: 'Agreement may have been created but requires verification',
+              transientDocumentId,
+              documentName,
+              recipientCount: recipients.length
+            };
+          } else if (result.status === 'RATE_LIMITED') {
+            // Return rate limit information
+            return {
+              agreementId: null,
+              method: 'rate-limited',
+              success: false,
+              rateLimited: true,
+              retryAfter: result.retryAfter,
+              message: `Adobe Sign rate limit reached. Please try again in ${Math.ceil(result.retryAfter / 60)} minutes.`,
+              errorMessage: result.errorMessage
+            };
+          }
+        } catch (socketError) {
+          // Check if this is a rate limit error
+          if (socketError.response && socketError.response.status === 429) {
+            const retryAfter = socketError.response.data?.retryAfter || 60;
+            logger.error(`Rate limit error in fallback approach. Retry after ${retryAfter} seconds.`);
+            
+            return {
+              agreementId: null,
+              method: 'rate-limited',
+              success: false,
+              rateLimited: true,
+              retryAfter: retryAfter,
+              message: `Adobe Sign rate limit reached. Please try again in ${Math.ceil(retryAfter / 60)} minutes.`,
+              errorMessage: socketError.response.data?.message || 'Rate limit exceeded'
+            };
+          }
+          
+          // Final fallback failed, log the error
+          logger.error(`Socket-protected fallback also failed: ${socketError.message}`);
+        }
+      }
+      
       throw new Error(`Failed to create agreement: ${basicError.message}`);
     }
     

@@ -245,19 +245,113 @@ const convertDocToPdf = async (docPath) => {
 };
 
 /**
+ * Convert Office document (DOCX/DOC) to PDF
+ * @param {string} filePath - Path to the document file
+ * @param {string} [outputPath] - Optional output path for the PDF file
+ * @returns {Promise<string>} - Path to the converted PDF file
+ */
+const convertOfficeDocToPdf = async (filePath, outputPath = null) => {
+  try {
+    const fileExtension = path.extname(filePath).toLowerCase();
+    let docBuffer = fs.readFileSync(filePath);
+    
+    // Create output path if not provided
+    if (!outputPath) {
+      const baseName = path.basename(filePath, fileExtension);
+      outputPath = path.join(path.dirname(filePath), `${baseName}_converted_${Date.now()}.pdf`);
+    }
+    
+    // Log details for debugging
+    logger.info(`Converting Office document to PDF: ${filePath} -> ${outputPath}`);
+    logger.info(`File extension: ${fileExtension}, Size: ${docBuffer.length} bytes`);
+    
+    // Convert to PDF using LibreOffice
+    try {
+      const pdfBuffer = await libreConvert(docBuffer, '.pdf', undefined);
+      
+      // Write the PDF file
+      fs.writeFileSync(outputPath, pdfBuffer);
+      
+      logger.info(`Office document converted to PDF: ${outputPath} (${pdfBuffer.length} bytes)`);
+      return outputPath;
+    } catch (convertError) {
+      logger.error(`LibreOffice conversion error: ${convertError.message}`);
+      
+      // If direct conversion fails and it's a DOC file, try DOCX conversion first
+      if (fileExtension === '.doc') {
+        logger.info('Attempting DOC -> DOCX -> PDF conversion path');
+        const docxPath = await convertDocToDocx(filePath);
+        const docxBuffer = fs.readFileSync(docxPath);
+        
+        const pdfBuffer = await libreConvert(docxBuffer, '.pdf', undefined);
+        fs.writeFileSync(outputPath, pdfBuffer);
+        
+        // Clean up temporary DOCX file
+        try { fs.unlinkSync(docxPath); } catch (e) { /* ignore */ }
+        
+        logger.info(`DOC file converted to PDF via DOCX: ${outputPath}`);
+        return outputPath;
+      } else {
+        throw convertError;
+      }
+    }
+  } catch (error) {
+    logger.error(`Error converting Office document to PDF: ${error.message}`);
+    throw new Error(`Failed to convert document to PDF: ${error.message}`);
+  }
+};
+
+/**
  * Main conversion function that handles both DOCX and DOC files
  * @param {string} filePath - Path to the document file
  * @returns {Promise<string>} - Path to the converted PDF file
  */
-const convertToPdf = async (filePath) => {
-  const fileExtension = path.extname(filePath).toLowerCase();
-  
-  if (fileExtension === '.docx') {
-    return await convertDocxToPdf(filePath);
-  } else if (fileExtension === '.doc') {
-    return await convertDocToPdf(filePath);
-  } else {
-    throw new Error(`Unsupported file format for conversion: ${fileExtension}`);
+/**
+ * Convert a document to PDF
+ * @param {string} filePath - Path to document file
+ * @param {string} [outputPath] - Optional output path for the PDF
+ * @returns {Promise<string>} - Path to converted PDF file
+ */
+const convertToPdf = async (filePath, outputPath = null) => {
+  try {
+    const fileExtension = path.extname(filePath).toLowerCase();
+    
+    logger.info(`Converting document to PDF: ${filePath} (${fileExtension})`);
+    
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    
+    // Log file size for debugging
+    const stats = fs.statSync(filePath);
+    logger.info(`File size: ${stats.size} bytes`);
+    
+    if (['.docx', '.doc'].includes(fileExtension)) {
+      // Use the unified office document conversion function
+      return await convertOfficeDocToPdf(filePath, outputPath);
+    } else if (fileExtension === '.pdf') {
+      // No conversion needed, return original file path or copy to output path if specified
+      if (outputPath && outputPath !== filePath) {
+        fs.copyFileSync(filePath, outputPath);
+        logger.info(`PDF already, copied to: ${outputPath}`);
+        return outputPath;
+      }
+      logger.info(`File is already PDF, no conversion needed: ${filePath}`);
+      return filePath;
+    } else {
+      // For unrecognized extensions, try the office conversion anyway as a fallback
+      logger.warn(`Unrecognized file extension: ${fileExtension}, attempting conversion with LibreOffice`);
+      try {
+        return await convertOfficeDocToPdf(filePath, outputPath);
+      } catch (conversionError) {
+        logger.error(`Conversion failed for unknown file type: ${conversionError.message}`);
+        throw new Error(`Unsupported file format for conversion: ${fileExtension}`);
+      }
+    }
+  } catch (error) {
+    logger.error(`Error in convertToPdf: ${error.message}`);
+    throw error;
   }
 };
 
@@ -1143,12 +1237,68 @@ const normalizeAdobeSignTags = (content) => {
   return normalizedContent;
 };
 
+/**
+ * Identifies DOCX files even if they have incorrect extensions or mime types
+ * Uses magic numbers and file signatures to detect actual file formats
+ * @param {string} filePath - Path to the file to check
+ * @returns {Promise<{detected: string, confidence: number}>} - Detected file type and confidence level
+ */
+const identifyFileFormat = async (filePath) => {
+  try {
+    // Read first 8 bytes of file to check signature
+    const fd = fs.openSync(filePath, 'r');
+    const buffer = Buffer.alloc(8);
+    fs.readSync(fd, buffer, 0, 8, 0);
+    fs.closeSync(fd);
+    
+    // DOCX files start with "PK" (zip file signature)
+    if (buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) {
+      // This is likely a ZIP-based format like DOCX, XLSX, PPTX
+      try {
+        // Check if it has the right structure for a DOCX file
+        const zip = new PizZip(fs.readFileSync(filePath));
+        
+        // DOCX files have specific files in their structure
+        if (zip.files['word/document.xml']) {
+          return { detected: '.docx', confidence: 0.9 };
+        } else if (zip.files['xl/workbook.xml']) {
+          return { detected: '.xlsx', confidence: 0.9 };
+        } else if (zip.files['ppt/presentation.xml']) {
+          return { detected: '.pptx', confidence: 0.9 };
+        }
+        
+        return { detected: '.zip', confidence: 0.7 };
+      } catch (zipError) {
+        logger.warn(`ZIP structure check failed: ${zipError.message}`);
+        return { detected: '.zip', confidence: 0.5 };
+      }
+    }
+    
+    // PDF signature (%PDF-)
+    if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+      return { detected: '.pdf', confidence: 0.9 };
+    }
+    
+    // DOC files (old MS Word format) often start with D0 CF 11 E0
+    if (buffer[0] === 0xD0 && buffer[1] === 0xCF && buffer[2] === 0x11 && buffer[3] === 0xE0) {
+      return { detected: '.doc', confidence: 0.8 };
+    }
+    
+    // Return unknown if no match
+    return { detected: 'unknown', confidence: 0 };
+  } catch (error) {
+    logger.error(`Error identifying file format: ${error.message}`);
+    return { detected: 'unknown', confidence: 0 };
+  }
+};
+
 module.exports = {
   processDocumentTemplate,
   processDocxTemplate,
   convertDocToDocx,
   convertDocxToPdf,
   convertDocToPdf,
+  convertOfficeDocToPdf,
   convertToPdf,
   extractTextContent,
   extractTemplateVariables,
@@ -1160,5 +1310,6 @@ module.exports = {
   containsAdobeSignTags,
   detectAdobeSignTags,
   extractTextFromPdf,
-  normalizeAdobeSignTags
+  normalizeAdobeSignTags,
+  identifyFileFormat
 };

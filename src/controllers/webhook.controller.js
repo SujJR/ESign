@@ -2,7 +2,7 @@ const Document = require('../models/document.model');
 const Log = require('../models/log.model');
 const logger = require('../utils/logger');
 const { formatResponse } = require('../utils/apiUtils');
-const { getAccessToken } = require('../config/adobeSign');
+const { getAccessToken, createWebhook } = require('../config/adobeSign');
 
 /**
  * Handle Adobe Sign webhook events
@@ -18,12 +18,13 @@ exports.handleAdobeSignWebhook = async (req, res) => {
     
     // Log the webhook event
     await Log.create({
+      level: 'info',
+      message: `Adobe Sign webhook event received: ${eventData.event}`,
       action: 'ADOBE_SIGN_WEBHOOK',
       details: {
         event: eventData.event,
         data: eventData
-      },
-      level: 'info'
+      }
     });
     
     // Handle different event types
@@ -327,20 +328,18 @@ exports.setupWebhook = async (req, res) => {
     // Get access token
     const accessToken = await getAccessToken();
     
-    // Create Adobe Sign client
-    const adobeSign = require('../config/adobeSign');
-    
     // Create webhook
-    const webhookInfo = await adobeSign.createWebhook(accessToken, webhookUrl);
+    const webhookInfo = await createWebhook(accessToken, webhookUrl);
     
     // Log webhook creation
     await Log.create({
+      level: 'info',
+      message: `Adobe Sign webhook configured: ${webhookUrl}`,
       action: 'WEBHOOK_SETUP',
       details: {
         webhookId: webhookInfo.id,
         webhookUrl: webhookUrl
-      },
-      level: 'info'
+      }
     });
     
     return res.status(200).json(formatResponse('Webhook setup successful', { webhookInfo }));

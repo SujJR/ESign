@@ -20,11 +20,10 @@ exports.updateSignatureStatus = async (req, res, next) => {
     // Get access token
     const accessToken = await getAccessToken();
     
-    // Create Adobe Sign client
-    const adobeSign = await createAdobeSignClient();
+    // No need to create Adobe Sign client anymore
     
     // Get agreement info
-    const agreementInfo = await adobeSign.getAgreementInfo(accessToken, document.adobeAgreementId);
+    const agreementInfo = await getAgreementInfo(accessToken, document.adobeAgreementId);
     
     logger.info(`Retrieved agreement info for ${documentId}, status: ${agreementInfo.status}`);
     
@@ -117,5 +116,68 @@ exports.updateSignatureStatus = async (req, res, next) => {
   } catch (error) {
     logger.error(`Error updating signature status: ${error.message}`);
     return next(new ApiError(500, `Failed to update signature status: ${error.message}`));
+  }
+};
+
+/**
+ * Recover document from socket hang up error
+ * @route POST /api/documents/:id/recover
+ */
+exports.recoverDocument = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    logger.info(`Starting document recovery for ID: ${id}`);
+    
+    // Call the recovery utility
+    const { recoverDocument: recoverDocumentUtil } = require('../utils/documentRecovery');
+    const recoveryResult = await recoverDocumentUtil(id);
+    
+    if (recoveryResult.success) {
+      // Log the recovery
+      await Log.create({
+        action: 'document_recovery',
+        status: 'success',
+        details: {
+          documentId: id,
+          method: recoveryResult.verifiedRecovery ? 'verified' : 'aggressive',
+          timestamp: new Date()
+        }
+      });
+      
+      return res.status(200).json({
+        success: true,
+        status: 200,
+        message: recoveryResult.message,
+        data: {
+          document: recoveryResult.document,
+          agreementId: recoveryResult.adobeAgreementId || 'unknown',
+          recoveryApplied: !!recoveryResult.recoveryApplied,
+          verifiedRecovery: !!recoveryResult.verifiedRecovery
+        }
+      });
+    } else {
+      // Log the failed recovery attempt
+      await Log.create({
+        action: 'document_recovery',
+        status: 'failure',
+        details: {
+          documentId: id,
+          error: recoveryResult.message,
+          timestamp: new Date()
+        }
+      });
+      
+      return res.status(400).json({
+        success: false,
+        status: 400,
+        message: recoveryResult.message,
+        data: {
+          document: recoveryResult.document || null
+        }
+      });
+    }
+  } catch (error) {
+    logger.error(`Error in document recovery: ${error.message}`);
+    return next(new ApiError(500, `Document recovery failed: ${error.message}`));
   }
 };

@@ -62,7 +62,23 @@ const saveFile = async (buffer, filename) => {
   }
 };
 
+/**
+ * Get the page count of a PDF file
+ * @param {string} filePath - Path to the PDF file
+ * @returns {Promise<number>} - Number of pages in the PDF
+ */
+const getPdfPageCount = async (filePath) => {
+  try {
+    const pdfInfo = await analyzePdf(filePath);
+    return pdfInfo.pageCount;
+  } catch (error) {
+    logger.error(`Error getting PDF page count: ${error.message}`);
+    throw error;
+  }
+};
+
 module.exports = {
   analyzePdf,
-  saveFile
+  saveFile,
+  getPdfPageCount
 };

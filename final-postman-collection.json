@@ -244,7 +244,7 @@
               ]
             },
             "url": "{{baseUrl}}/api/documents/upload-from-url",
-            "description": "Upload a document from a URL and process it with JSON data. You can provide multiple JSON files that will be automatically combined."
+            "description": "Upload a document from a URL and process it with JSON data. You can provide multiple JSON files that will be automatically combined.\n\n⚠️ TROUBLESHOOTING:\n- If you see 'socket hang up' errors, it means the connection to the remote server was terminated unexpectedly.\n- Try a different URL, check server accessibility, or use a direct upload instead.\n- Only HTTP and HTTPS URLs are supported.\n- Timeouts are set at 30 seconds for connection and 60 seconds for download.\n- Large files may cause timeouts - consider using direct upload for files over 10MB."
           }
         },
         {
@@ -280,7 +280,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"documentUrl\": \"https://example.com/path/to/document.docx\",\n  \"jsonData\": {\n    \"clientName\": \"ABC Corporation\",\n    \"clientEmail\": \"contact@abccorp.com\",\n    \"signerName\": \"John Smith\",\n    \"signerEmail\": \"{{recipientEmail}}\",\n    \"signerTitle\": \"CEO\",\n    \"projectName\": \"Website Redesign\",\n    \"startDate\": \"June 15, 2025\",\n    \"endDate\": \"December 15, 2025\",\n    \"contractValue\": \"$50,000\",\n    \"recipients\": [\n      {\n        \"name\": \"John Smith\",\n        \"email\": \"{{recipientEmail}}\",\n        \"title\": \"CEO\",\n        \"signatureField\": \"signature_signer\"\n      },\n      {\n        \"name\": \"Jane Doe\",\n        \"email\": \"jane.doe@example.com\",\n        \"title\": \"CFO\",\n        \"signatureField\": \"signature_witness\"\n      }\n    ]\n  }\n}",
+              "raw": "{\n  \"documentUrl\": \"https://www.adobe.com/content/dam/cc/en/pdf/AdobeDocument_SamplePDF.pdf\",\n  \"jsonData\": {\n    \"clientName\": \"ABC Corporation\",\n    \"clientEmail\": \"contact@abccorp.com\",\n    \"signerName\": \"John Smith\",\n    \"signerEmail\": \"{{recipientEmail}}\",\n    \"signerTitle\": \"CEO\",\n    \"projectName\": \"Website Redesign\",\n    \"startDate\": \"June 15, 2025\",\n    \"endDate\": \"December 15, 2025\",\n    \"contractValue\": \"$50,000\",\n    \"recipients\": [\n      {\n        \"name\": \"John Smith\",\n        \"email\": \"{{recipientEmail}}\",\n        \"title\": \"CEO\",\n        \"signatureField\": \"signature_signer\"\n      },\n      {\n        \"name\": \"Jane Doe\",\n        \"email\": \"jane.doe@example.com\",\n        \"title\": \"CFO\",\n        \"signatureField\": \"signature_witness\"\n      }\n    ]\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -288,7 +288,7 @@
               }
             },
             "url": "{{baseUrl}}/api/documents/upload-from-url",
-            "description": "Upload a document from a URL and provide JSON template data directly in the request body instead of as files."
+            "description": "Upload a document from a URL and provide JSON template data directly in the request body instead of as files.\n\n⚠️ IMPORTANT NOTES:\n- Use a reliable and accessible URL - check that you can access it in your browser first.\n- Supported formats: PDF, DOCX, DOC (Word docs will be converted to PDF)\n- Some networks block downloads from external URLs - ensure your server has internet access.\n- Add custom timeout handling in your application to handle slow downloads.\n- For production, consider adding a retry mechanism for transient network errors."
           }
         },
         {

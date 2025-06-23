@@ -1,5 +1,6 @@
 const express = require('express');
 const documentController = require('../controllers/document.controller');
+const documentControllerAdditions = require('../controllers/document.controller.additions');
 const { uploadDocument, uploadDocumentWithData, uploadDocumentFromUrl, handleMulterErrors } = require('../middleware/upload');
 const { authenticateApiKey, requirePermissions } = require('../middleware/apiKeyAuth');
 
@@ -47,6 +48,9 @@ router.get('/:id/status', requirePermissions(['documents:read', 'admin:all']), d
 
 // Update signature status
 router.post('/:id/update-status', requirePermissions(['documents:write', 'admin:all']), documentController.updateSignatureStatus);
+
+// Recover document from socket hang up error
+router.post('/:id/recover', requirePermissions(['documents:write', 'admin:all']), documentControllerAdditions.recoverDocument);
 
 // Download document
 router.get('/:id/download', requirePermissions(['documents:read', 'admin:all']), documentController.downloadDocument);
