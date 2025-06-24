@@ -4,7 +4,7 @@
 
 const logger = require('../utils/logger');
 const Document = require('../models/document.model');
-const { getEnhancedAgreementInfo, getAccessToken } = require('../config/adobeSign');
+const { getComprehensiveAgreementInfo, getAccessToken } = require('../config/adobeSign');
 const { reminderScheduler } = require('./reminderScheduler');
 
 /**
@@ -71,7 +71,7 @@ class DocumentStatusMonitor {
   async checkDocumentStatus(config) {
     try {
       const accessToken = await getAccessToken();
-      const agreementInfo = await getEnhancedAgreementInfo(accessToken, config.agreementId);
+      const agreementInfo = await getComprehensiveAgreementInfo(accessToken, config.agreementId);
       
       config.lastChecked = new Date();
       config.consecutiveErrors = 0;

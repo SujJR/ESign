@@ -4,7 +4,7 @@
 
 const logger = require('../utils/logger');
 const Document = require('../models/document.model');
-const { getEnhancedAgreementInfo, getAccessToken, sendReminder } = require('../config/adobeSign');
+const { getComprehensiveAgreementInfo, getAccessToken, sendReminder } = require('../config/adobeSign');
 
 /**
  * Intelligent reminder scheduler that respects signing workflows and timing
@@ -39,7 +39,7 @@ class ReminderScheduler {
 
       // Get current agreement status
       const accessToken = await getAccessToken();
-      const agreementInfo = await getEnhancedAgreementInfo(accessToken, document.adobeAgreementId);
+      const agreementInfo = await getComprehensiveAgreementInfo(accessToken, document.adobeAgreementId);
 
       if (!agreementInfo || !this.isReminderEligible(agreementInfo.status)) {
         logger.info(`📋 Document ${documentId} not eligible for reminders (status: ${agreementInfo?.status})`);
@@ -143,7 +143,7 @@ class ReminderScheduler {
 
       // Check if document still needs reminders
       const accessToken = await getAccessToken();
-      const agreementInfo = await getEnhancedAgreementInfo(accessToken, document.adobeAgreementId);
+      const agreementInfo = await getComprehensiveAgreementInfo(accessToken, document.adobeAgreementId);
 
       if (!this.isReminderEligible(agreementInfo.status)) {
         logger.info(`📋 Document ${reminder.documentId} no longer needs reminders (status: ${agreementInfo.status})`);

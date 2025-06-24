@@ -19,7 +19,12 @@
     "test-final": "node test-final-fix.js",
     "test-solution": "node test-final-solution.js",
     "test-enhanced": "node test-enhanced-signature.js",
-    "test-enhanced-features": "node test-enhanced-features.js"
+    "test-enhanced-features": "node test-enhanced-features.js",
+    "debug-reminder": "node debug-reminder-logic.js",
+    "debug-reminder": "node debug-reminder-logic.js",
+    "debug-sequential-signing": "node debug-sequential-signing-detection.js",
+    "test-all-active": "node test-all-active-issue.js",
+    "test-reminder": "node test-enhanced-reminder.js"
   },
   "keywords": [],
   "author": "",

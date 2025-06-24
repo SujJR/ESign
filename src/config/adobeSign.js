@@ -284,40 +284,52 @@ const sendReminder = async (accessToken, agreementId, message = 'Please sign thi
     // If no participant IDs provided, get agreement info to extract them
     let targetParticipantIds = participantIds || [];
     
-    if (!participantIds || participantIds.length === 0) {
-      logger.info('No participant IDs provided, fetching agreement info to extract pending participants');
+    // If no participant IDs provided, we need to fetch participants from the agreement
+    if (!targetParticipantIds || targetParticipantIds.length === 0) {
+      logger.info('No participant IDs provided, fetching active participants from agreement');
       
       try {
         const agreementInfo = await getComprehensiveAgreementInfo(accessToken, agreementId);
         
-        if (agreementInfo && agreementInfo.participants && agreementInfo.participants.participantSets) {
+        // Try different possible locations where participant info might be found
+        if (agreementInfo.participants && agreementInfo.participants.participantSets) {
           for (const participantSet of agreementInfo.participants.participantSets) {
             if (participantSet.role === 'SIGNER') {
-              for (const participant of participantSet.memberInfos) {
-                // Only include participants who need to take action
-                const needsAction = 
-                  participant.status === 'WAITING_FOR_MY_SIGNATURE' ||
-                  participant.status === 'WAITING_FOR_MY_APPROVAL' ||
-                  participant.status === 'WAITING_FOR_MY_DELEGATION' ||
-                  participant.status === 'WAITING_FOR_MY_ACCEPTANCE' ||
-                  participant.status === 'WAITING_FOR_MY_FORM_FILLING';
-                
-                if (needsAction && participant.id) {
-                  targetParticipantIds.push(participant.id);
-                  logger.info(`Added participant ID for reminder: ${participant.id} (${participant.email})`);
+              for (const member of participantSet.memberInfos || []) {
+                if (member.id) {
+                  targetParticipantIds.push(member.id);
+                  logger.info(`Found participant ID: ${member.id} (${member.email || 'unknown'}, status: ${member.status || 'unknown'})`);
                 }
               }
             }
           }
         }
         
-        logger.info(`Extracted ${targetParticipantIds.length} participant IDs for reminder`);
-      } catch (infoError) {
-        logger.warn(`Could not get agreement info for participant extraction: ${infoError.message}`);
-        // Continue with empty array - Adobe Sign may handle this gracefully
+        // Try alternative location for participant data
+        if (targetParticipantIds.length === 0 && agreementInfo.participantSets) {
+          for (const participantSet of agreementInfo.participantSets) {
+            if (participantSet.role === 'SIGNER') {
+              for (const member of participantSet.memberInfos || []) {
+                if (member.id) {
+                  targetParticipantIds.push(member.id);
+                  logger.info(`Found participant ID (alt location): ${member.id} (${member.email || 'unknown'}, status: ${member.status || 'unknown'})`);
+                }
+              }
+            }
+          }
+        }
+        
+        logger.info(`Found ${targetParticipantIds.length} participant IDs from agreement`);
+      } catch (error) {
+        logger.error(`Error fetching agreement participants: ${error.message}`);
       }
     }
-
+    
+    // If we still don't have any participant IDs, we can't send a reminder
+    if (targetParticipantIds.length === 0) {
+      throw new Error('No participant IDs found for this agreement - Adobe Sign API requires at least one valid participant ID');
+    }
+    
     // Setup headers
     const headers = {
       'Content-Type': 'application/json',
@@ -329,16 +341,17 @@ const sendReminder = async (accessToken, agreementId, message = 'Please sign thi
       headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
     }
 
-    // Log the request we're about to make
-    logger.info(`Sending reminder request to: ${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/reminders`);
-
-    // Prepare reminder data
+    // Prepare reminder data with the participant IDs
     const reminderData = {
       status: 'ACTIVE',
       recipientParticipantIds: targetParticipantIds,
       note: message
     };
 
+    // Log the request we're about to make
+    logger.info(`Sending reminder request to: ${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/reminders`);
+    logger.info(`Including ${targetParticipantIds.length} participant IDs in reminder request`);
+    
     // Log the request payload
     logger.info(`Reminder request data: ${JSON.stringify(reminderData)}`);
 
@@ -734,7 +747,7 @@ const getComprehensiveAgreementInfo = async (accessToken, agreementId) => {
  * @param {string} agreementId - Agreement ID
  * @returns {object} - Enhanced signing status with actual participant states
  */
-const getActualSigningStatus = async (accessToken, agreementId) => {
+const getActualSigningStatus = async (accessToken, agreementId, documentRecipients = null) => {
   const status = {
     signedParticipants: [],
     pendingParticipants: [],
@@ -748,26 +761,54 @@ const getActualSigningStatus = async (accessToken, agreementId) => {
     
     // Get basic agreement info first
     const agreementInfo = await getAgreementInfo(accessToken, agreementId);
-    if (!agreementInfo || !agreementInfo.participantSets) {
-      logger.warn('No participant sets found in agreement info');
-      return status;
-    }
-
+    
     // Extract all participants with their order and current status
     const participants = [];
-    for (const participantSet of agreementInfo.participantSets) {
-      if (participantSet.role === 'SIGNER') {
-        for (const participant of participantSet.memberInfos) {
+    
+    // Method 1: Try to get participants from the agreement info
+    if (agreementInfo && agreementInfo.participantSets && agreementInfo.participantSets.length > 0) {
+      logger.info(`Found ${agreementInfo.participantSets.length} participant sets in agreement info`);
+      
+      for (const participantSet of agreementInfo.participantSets) {
+        if (participantSet.role === 'SIGNER') {
+          for (const setParticipant of participantSet.memberInfos) {
+            participants.push({
+              email: setParticipant.email,
+              name: setParticipant.name,
+              id: setParticipant.id,
+              order: participantSet.order,
+              status: setParticipant.status,
+              originalStatus: setParticipant.status // Keep original for debugging
+            });
+          }
+        }
+      }
+    } else {
+      logger.warn('No participant sets found in agreement info');
+      
+      // Method 2: Try to use document recipients if available
+      if (documentRecipients && documentRecipients.length > 0) {
+        logger.info(`Using ${documentRecipients.length} recipients from document data`);
+        
+        // Map document recipients to participant format
+        for (let i = 0; i < documentRecipients.length; i++) {
+          const recipient = documentRecipients[i];
           participants.push({
-            email: participant.email,
-            name: participant.name,
-            id: participant.id,
-            order: participantSet.order,
-            status: participant.status,
-            originalStatus: participant.status // Keep original for debugging
+            email: recipient.email,
+            name: recipient.name,
+            // Assign order based on array index if not specified
+            order: recipient.order || i + 1, 
+            // Default to ACTIVE status if not specified
+            status: recipient.status === 'signed' ? 'SIGNED' : 'ACTIVE',
+            originalStatus: recipient.status || 'UNKNOWN'
           });
         }
       }
+    }
+    
+    if (participants.length === 0) {
+      logger.warn('No participants found using any method');
+      return status;
     }
 
     logger.info(`Found ${participants.length} participants to analyze`);
@@ -775,7 +816,7 @@ const getActualSigningStatus = async (accessToken, agreementId) => {
     // Method 1: Analyze participant status from Adobe Sign directly
     const participantSigningStatus = [];
     
-    for (const participant of participants) {
+    for (const baseParticipant of participants) {
       // Check if participant status indicates they've already completed their action
       const completedStatuses = [
         'SIGNED', 'APPROVED', 'ACCEPTED', 'FORM_FILLED', 
@@ -796,30 +837,30 @@ const getActualSigningStatus = async (accessToken, agreementId) => {
       let canSign = false;
       let signedDetectedBy = null;
       
-      logger.info(`📋 Analyzing participant: ${participant.email} - Status: ${participant.status} (Order: ${participant.order})`);
+      logger.info(`📋 Analyzing participant: ${baseParticipant.email} - Status: ${baseParticipant.status} (Order: ${baseParticipant.order})`);
       
-      if (completedStatuses.includes(participant.status)) {
+      if (completedStatuses.includes(baseParticipant.status)) {
         actualStatus = 'SIGNED';
         canSign = false;
         signedDetectedBy = 'status_analysis';
-        logger.info(`✅ ${participant.email} COMPLETED via status: ${participant.status} (order: ${participant.order})`);
-      } else if (pendingActionStatuses.includes(participant.status)) {
+        logger.info(`✅ ${baseParticipant.email} COMPLETED via status: ${baseParticipant.status} (order: ${baseParticipant.order})`);
+      } else if (pendingActionStatuses.includes(baseParticipant.status)) {
         actualStatus = 'PENDING';
         canSign = true;
-        logger.info(`⏳ ${participant.email} CAN TAKE ACTION: ${participant.status} (order: ${participant.order})`);
-      } else if (waitingStatuses.includes(participant.status)) {
+        logger.info(`⏳ ${baseParticipant.email} CAN TAKE ACTION: ${baseParticipant.status} (order: ${baseParticipant.order})`);
+      } else if (waitingStatuses.includes(baseParticipant.status)) {
         actualStatus = 'WAITING';
         canSign = false;
-        logger.info(`⏸️ ${participant.email} WAITING FOR OTHERS: ${participant.status} (order: ${participant.order})`);
+        logger.info(`⏸️ ${baseParticipant.email} WAITING FOR OTHERS: ${baseParticipant.status} (order: ${baseParticipant.order})`);
       } else {
-        logger.warn(`❓ ${participant.email} has UNKNOWN STATUS: ${participant.status} (order: ${participant.order})`);
+        logger.warn(`❓ ${baseParticipant.email} has UNKNOWN STATUS: ${baseParticipant.status} (order: ${baseParticipant.order})`);
         // For unknown status, try to be conservative and assume they can sign unless proven otherwise
         actualStatus = 'PENDING';
         canSign = true;
       }
       
       participantSigningStatus.push({
-        ...participant,
+        ...baseParticipant,
         actualStatus,
         canSign,
         signedDetectedBy
@@ -827,368 +868,527 @@ const getActualSigningStatus = async (accessToken, agreementId) => {
     }
 
     // Method 2: Try to get signing URLs for each participant to double-check
-    // If we can't get a signing URL, it might mean they've already signed
-    for (const participant of participantSigningStatus) {
-      if (participant.actualStatus === 'PENDING' || participant.actualStatus === 'UNKNOWN') {
-        try {
-          const signingUrl = await getSigningUrl(accessToken, agreementId, participant.email);
-          
-          if (signingUrl && signingUrl.signingUrls && signingUrl.signingUrls.length > 0) {
-            // Participant can still sign - confirms pending status
-            participant.canSign = true;
-            participant.actualStatus = 'PENDING';
-            participant.signingUrl = signingUrl.signingUrls[0].esignUrl;
-            logger.info(`🔗 ${participant.email} has valid signing URL - confirmed pending`);
-          } else {
-            // No signing URL available - might have signed
-            logger.info(`🚫 ${participant.email} has no signing URL - might have already signed`);
-            participant.canSign = false;
-            participant.actualStatus = 'SIGNED';
-            participant.signedDetectedBy = 'no_signing_url';
+    // If we can't get a signing URL, it typically means they've already signed
+    logger.info(`🔗 Testing signing URL availability for each participant...`);
+    
+    for (const urlParticipant of participantSigningStatus) {
+      // Skip if we already determined they're signed from status
+      if (urlParticipant.actualStatus === 'SIGNED') {
+        logger.info(`⏭️ Skipping ${urlParticipant.email} - already marked as signed`);
+        continue;
+      }
+      
+      try {
+        logger.info(`🔗 Testing signing URL for ${urlParticipant.email}...`);
+        // Use the participant ID if available, otherwise use email as a fallback
+        // Note: Using email directly often causes false positives for "already signed"
+        const participantParam = urlParticipant.id || urlParticipant.email;
+        const signingUrl = await getSigningUrl(accessToken, agreementId, participantParam);
+        
+        // Debug: Log the full response structure to understand what we're getting
+        logger.info(`🔍 Signing URL response structure for ${urlParticipant.email}: ${JSON.stringify(signingUrl, null, 2)}`);
+        
+        // Check multiple possible response structures
+        let hasValidSigningUrl = false;
+        let extractedUrl = null;
+        
+        if (signingUrl) {
+          // Check for standard structure: signingUrls array
+          if (signingUrl.signingUrls && Array.isArray(signingUrl.signingUrls) && signingUrl.signingUrls.length > 0) {
+            hasValidSigningUrl = true;
+            extractedUrl = signingUrl.signingUrls[0].esignUrl;
           }
-        } catch (error) {
-          // If getting signing URL fails, analyze the error
-          if (error.message.includes('ALREADY_SIGNED') || 
-              error.message.includes('PARTICIPANT_NOT_FOUND') ||
-              error.message.includes('404')) {
-            participant.canSign = false;
-            participant.actualStatus = 'SIGNED';
-            participant.signedDetectedBy = 'signing_url_error';
-            logger.info(`✅ ${participant.email} confirmed signed via URL error: ${error.message.substring(0, 100)}`);
-          } else {
-            logger.warn(`⚠️ Error getting signing URL for ${participant.email}: ${error.message.substring(0, 100)}`);
-            // Keep original status determination
+          // Check for alternative structure: direct URL properties
+          else if (signingUrl.signingUrl || signingUrl.esignUrl || signingUrl.url) {
+            hasValidSigningUrl = true;
+            extractedUrl = signingUrl.signingUrl || signingUrl.esignUrl || signingUrl.url;
+          }
+          // Check if it's a direct string URL
+          else if (typeof signingUrl === 'string' && signingUrl.includes('http')) {
+            hasValidSigningUrl = true;
+            extractedUrl = signingUrl;
+          }
+          // Check for nested structures or other possible formats
+          else if (signingUrl.data && signingUrl.data.signingUrls) {
+            hasValidSigningUrl = true;
+            extractedUrl = signingUrl.data.signingUrls[0]?.esignUrl;
           }
         }
+        
+        if (hasValidSigningUrl && extractedUrl) {
+          // Participant can still sign - this means they haven't signed yet
+          urlParticipant.canSign = true;
+          urlParticipant.actualStatus = 'PENDING';
+          urlParticipant.signingUrl = extractedUrl;
+          logger.info(`✅ ${urlParticipant.email} can still sign - URL available: ${extractedUrl.substring(0, 50)}...`);
+        } else {
+          // Be more cautious about marking as signed based only on URL unavailability
+          // Let's only mark as "likely signed" and rely on other detection methods for confirmation
+          logger.info(`🚫 ${urlParticipant.email} has no signing URL - likely already signed`);
+          urlParticipant.urlUnavailable = true;
+          
+          // Don't immediately mark as signed - we'll make that determination after all checks
+          // This avoids false positives but we can use this as supporting evidence
+          if (urlParticipant.actualStatus === 'PENDING') {
+            urlParticipant.likelySignedFromUrl = true;
+          }
+        }
+      } catch (error) {
+        // Analyze the error to determine if they've signed
+        const errorMessage = error.message.toLowerCase();
+        logger.info(`⚠️ Error getting signing URL for ${urlParticipant.email}: ${error.message.substring(0, 200)}`);
+        
+        // Only specific error messages strongly indicate the participant has already signed
+        if (errorMessage.includes('already_signed') || 
+            errorMessage.includes('already signed') ||
+            errorMessage.includes('participant has completed their actions')) {
+          // These errors definitively indicate the participant has already signed
+          urlParticipant.canSign = false;
+          urlParticipant.actualStatus = 'SIGNED';
+          urlParticipant.signedDetectedBy = 'signing_url_error_confirmed';
+          logger.info(`✅ ${urlParticipant.email} CONFIRMED SIGNED based on specific error message`);
+        } else if (errorMessage.includes('unauthorized') || 
+            errorMessage.includes('forbidden') ||
+            errorMessage.includes('401') ||
+            errorMessage.includes('403') ||
+            errorMessage.includes('access denied')) {
+          // Authorization errors - inconclusive for signing status
+          logger.warn(`🔒 Auth error for ${urlParticipant.email} - inconclusive for signing status`);
+          urlParticipant.urlErrorInconclusive = true;
+        } else {
+          // For other errors, don't assume they've signed - mark as inconclusive
+          logger.warn(`⚠️ Inconclusive result for ${urlParticipant.email} - URL error: ${errorMessage.substring(0, 100)}`);
+          urlParticipant.urlErrorInconclusive = true;
+        }
       }
+      
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // Method 3: Get agreement events for additional confirmation
+    // Method 3: Get agreement events for definitive signing confirmation
+    logger.info(`📋 Getting agreement events for definitive signing confirmation...`);
     try {
       const events = await getAgreementEvents(accessToken, agreementId);
-      if (events && events.events) {
-        logger.info(`📋 Found ${events.events.length} agreement events for additional validation`);
+      if (events && events.events && events.events.length > 0) {
+        logger.info(`📋 Found ${events.events.length} agreement events`);
         
-        // Look for signing completion events
-        for (const event of events.events) {
-          if (event.participantEmail && 
-              (event.type.includes('ESIGNED') || 
-               event.type.includes('SIGNED') || 
-               event.type.includes('COMPLETED'))) {
+        // Look for signing completion events and other relevant events
+        const signingEvents = events.events.filter(event => {
+          const eventType = event.type?.toLowerCase() || '';
+          const description = event.description?.toLowerCase() || '';
+          
+          // Only consider events that definitively indicate completion
+          return eventType.includes('esigned') || 
+                 eventType.includes('signed') || 
+                 eventType.includes('completed') ||
+                 eventType.includes('approved') ||
+                 eventType.includes('accepted') ||
+                 eventType.includes('action_completed') ||  // This indicates completion
+                 description.includes('signed') ||
+                 description.includes('completed');
+        });
+        
+        logger.info(`🔍 Found ${signingEvents.length} potential signing completion events`);
+        
+        // Process signing events to mark participants as signed
+        for (const event of signingEvents) {
+          if (event.participantEmail) {
+            const eventParticipant = participantSigningStatus.find(p => 
+              p.email.toLowerCase() === event.participantEmail.toLowerCase()
+            );
             
-            // Find this participant and confirm they've signed
-            const participant = participantSigningStatus.find(p => p.email === event.participantEmail);
-            if (participant) {
-              participant.actualStatus = 'SIGNED';
-              participant.canSign = false;
-              participant.signedDetectedBy = 'events';
-              participant.signedDate = event.date;
-              logger.info(`✅ ${event.participantEmail} confirmed signed via events: ${event.type} on ${event.date}`);
+            if (eventParticipant) {
+              // Only mark as signed for definitive completion events
+              const eventType = event.type?.toLowerCase() || '';
+              if (eventType.includes('completed') || 
+                  eventType.includes('signed') || 
+                  eventType.includes('approved') ||
+                  eventType.includes('accepted')) {
+                
+                // Mark as definitely signed based on completion events
+                eventParticipant.actualStatus = 'SIGNED';
+                eventParticipant.canSign = false;
+                eventParticipant.signedDetectedBy = 'completion_event';
+                eventParticipant.signedDate = event.date;
+                eventParticipant.signedEvent = event.type;
+                
+                logger.info(`✅ ${event.participantEmail} CONFIRMED SIGNED via completion event: ${event.type} on ${event.date}`);
+              } else {
+                // For non-completion events, just log but don't mark as signed
+                logger.info(`ℹ️ ${event.participantEmail} had event: ${event.type} on ${event.date} (not a completion event)`);
+              }
+            } else {
+              logger.warn(`⚠️ Event for unknown participant: ${event.participantEmail}`);
             }
           }
         }
-        status.detectionMethod = 'comprehensive';
+        
+        // Also look for delegation events which might indicate completion
+        const delegationEvents = events.events.filter(event => {
+          const eventType = event.type?.toLowerCase() || '';
+          return eventType.includes('delegated') || eventType.includes('delegation');
+        });
+        
+        for (const event of delegationEvents) {
+          if (event.participantEmail) {
+            const delegationParticipant = participantSigningStatus.find(p => 
+              p.email.toLowerCase() === event.participantEmail.toLowerCase()
+            );
+            
+            if (delegationParticipant && delegationParticipant.actualStatus !== 'SIGNED') {
+              delegationParticipant.actualStatus = 'SIGNED';
+              delegationParticipant.canSign = false;
+              delegationParticipant.signedDetectedBy = 'delegation_event';
+              delegationParticipant.signedDate = event.date;
+              
+              logger.info(`✅ ${event.participantEmail} marked as completed due to delegation event`);
+            }
+          }
+        }
+        
+        status.detectionMethod = 'comprehensive_with_events';
+      } else {
+        logger.warn(`No events found for agreement ${agreementId}`);
+        status.detectionMethod = 'status_and_urls_only';
       }
     } catch (eventsError) {
       logger.warn(`Could not get agreement events: ${eventsError.message}`);
-      status.detectionMethod = 'status_and_urls';
+      status.detectionMethod = 'status_and_urls_only';
     }
 
-    // Sort participants by order for sequential analysis
-    const sortedParticipants = participantSigningStatus.sort((a, b) => (a.order || 999) - (b.order || 999));
-
-    // Separate signed and pending participants based on our analysis
-    for (const participant of sortedParticipants) {
-      if (participant.actualStatus === 'SIGNED') {
-        status.signedParticipants.push(participant);
-      } else if (participant.actualStatus === 'PENDING' || participant.canSign) {
-        status.pendingParticipants.push(participant);
-      } else {
-        // Waiting participants - add to pending but mark as not able to sign yet
-        status.pendingParticipants.push({
-          ...participant,
-          canSign: false,
-          waitingForOthers: true
-        });
+    // Method 4: Try to get audit trail for the most reliable signing information
+    logger.info(`📜 Attempting to get audit trail for most reliable signing information...`);
+    try {
+      const auditTrail = await getAgreementAuditTrail(accessToken, agreementId);
+      if (auditTrail) {
+        logger.info(`📜 Successfully retrieved audit trail`);
+        
+        // Parse audit trail for signing information
+        // The audit trail typically contains detailed signing information
+        const auditText = auditTrail.toString?.() || JSON.stringify(auditTrail);
+        
+        // Look for signing patterns in the audit trail
+        for (const auditParticipant of participantSigningStatus) {
+          const emailPattern = auditParticipant.email.toLowerCase();
+          
+          // Check if this participant's email appears in signing contexts
+          const signingPatterns = [
+            `${emailPattern} signed`,
+            `${emailPattern} has signed`,
+            `signed by ${emailPattern}`,
+            `${emailPattern} completed`,
+            `${emailPattern} approved`
+          ];
+          
+          const foundSigningEvidence = signingPatterns.some(pattern => 
+            auditText.toLowerCase().includes(pattern)
+          );
+          
+          if (foundSigningEvidence && auditParticipant.actualStatus !== 'SIGNED') {
+            auditParticipant.actualStatus = 'SIGNED';
+            auditParticipant.canSign = false;
+            auditParticipant.signedDetectedBy = 'audit_trail';
+            logger.info(`✅ ${auditParticipant.email} confirmed signed via audit trail analysis`);
+          }
+        }
+        
+        status.detectionMethod = 'comprehensive_with_audit';
       }
+    } catch (auditError) {
+      logger.warn(`Could not get audit trail: ${auditError.message}`);
+      // Continue with other methods
     }
 
-    // Determine current signer (first pending participant who can sign)
-    const canSignNow = status.pendingParticipants.filter(p => p.canSign !== false && p.actualStatus !== 'WAITING');
+    // Method 5: Enhanced logic for sequential signing workflows
+    logger.info(`🔧 Applying enhanced sequential signing logic...`);
     
-    logger.info(`📊 Analysis for current signer determination:`);
-    logger.info(`  - Total pending participants: ${status.pendingParticipants.length}`);
-    logger.info(`  - Participants who can sign now: ${canSignNow.length}`);
+    // Count how many participants are still showing as ACTIVE/PENDING after all our checks
+    const stillActiveCount = participantSigningStatus.filter(p => 
+      p.actualStatus === 'PENDING' && (p.status === 'ACTIVE' || p.status === 'WAITING_FOR_MY_SIGNATURE')
+    ).length;
     
-    if (canSignNow.length > 0) {
-      // Sort by order to get the first one who should sign
-      const sortedCanSignNow = canSignNow.sort((a, b) => (a.order || 999) - (b.order || 999));
-      status.currentSigner = sortedCanSignNow[0];
-      status.nextSigner = sortedCanSignNow[1] || null;
+    const totalParticipants = participantSigningStatus.length;
+    const confirmedSignedCount = participantSigningStatus.filter(p => p.actualStatus === 'SIGNED').length;
+    
+    logger.info(`📊 After all detection methods: ${stillActiveCount}/${totalParticipants} still showing as active/pending`);
+    logger.info(`📊 Confirmed signed participants: ${confirmedSignedCount}/${totalParticipants}`);
+    
+    // Enhanced sequential signing logic: if we have sequential orders, apply proper workflow logic
+    const hasSequentialOrders = participantSigningStatus.some(p => p.order && p.order > 1);
+    
+    if (hasSequentialOrders) {
+      logger.info(`🔄 Applying sequential signing workflow logic`);
       
-      logger.info(`🎯 CURRENT SIGNER IDENTIFIED: ${status.currentSigner.email} (order: ${status.currentSigner.order})`);
-      if (status.nextSigner) {
-        logger.info(`⏭️ NEXT SIGNER: ${status.nextSigner.email} (order: ${status.nextSigner.order})`);
+      // Sort participants by order
+      const sortedByOrder = [...participantSigningStatus].sort((a, b) => (a.order || 999) - (b.order || 999));
+      
+      // Find the first participant who hasn't been confirmed as signed
+      let currentSignerIndex = -1;
+      for (let i = 0; i < sortedByOrder.length; i++) {
+        const sortedParticipant = sortedByOrder[i];
+        
+        // If this participant hasn't been confirmed as signed, they should be the current signer
+        if (sortedParticipant.actualStatus !== 'SIGNED') {
+          currentSignerIndex = i;
+          break;
+        }
       }
-    } else if (status.pendingParticipants.length > 0) {
-      logger.info(`⏸️ All ${status.pendingParticipants.length} pending participants are waiting for others`);
-      logger.info(`   Pending participants details:`);
-      status.pendingParticipants.forEach(p => {
-        logger.info(`     - ${p.email} (order: ${p.order}) - Status: ${p.actualStatus}, Can sign: ${p.canSign}`);
-      });
-    } else {
-      logger.info(`✅ No pending participants - all have completed signing`);
+      
+      if (currentSignerIndex >= 0) {
+        const currentSigner = sortedByOrder[currentSignerIndex];
+        logger.info(`🎯 Sequential logic identifies current signer: ${currentSigner.email} (order ${currentSigner.order})`);
+        
+        // Mark the current signer as able to sign
+        currentSigner.canSign = true;
+        currentSigner.actualStatus = 'PENDING';
+        currentSigner.isCurrent = true;
+        
+        // Mark all participants after the current signer as waiting
+        for (let i = currentSignerIndex + 1; i < sortedByOrder.length; i++) {
+          const waitingParticipant = sortedByOrder[i];
+          if (waitingParticipant.actualStatus !== 'SIGNED') {
+            logger.info(`⏸️ ${waitingParticipant.email} (order ${waitingParticipant.order}) is waiting for their turn`);
+            waitingParticipant.canSign = false;
+            waitingParticipant.actualStatus = 'WAITING';
+            waitingParticipant.waitingReason = 'sequential_order';
+          }
+        }
+        
+        status.detectionMethod = 'enhanced_sequential_logic';
+      } else {
+        logger.info(`✅ All participants in sequential workflow have been confirmed as signed`);
+        status.detectionMethod = 'sequential_complete';
+      }
+    } else if (stillActiveCount > 1) {
+      // Parallel signing or unclear workflow
+      logger.info(`🔄 Applying parallel signing logic - multiple participants can sign simultaneously`);
+      
+      // In parallel signing, all non-signed participants can potentially sign
+      for (const pendingParticipant of participantSigningStatus) {
+        if (pendingParticipant.actualStatus === 'PENDING') {
+          pendingParticipant.canSign = true;
+        }
+      }
+      
+      status.detectionMethod = 'parallel_signing_logic';
     }
 
-    logger.info(`📊 Final signing status: ${status.signedParticipants.length} signed, ${status.pendingParticipants.length} pending`);
+    // Method 6: Use document-level recipient information if available
+    if (documentRecipients && documentRecipients.length > 0) {
+      logger.info(`📋 Cross-referencing with document recipient information...`);
+      
+      for (const docRecipient of documentRecipients) {
+        const docParticipant = participantSigningStatus.find(p => 
+          p.email.toLowerCase() === docRecipient.email.toLowerCase()
+        );
+        
+        if (docParticipant && docRecipient.status) {
+          logger.info(`🔍 Document shows ${docRecipient.email} as: ${docRecipient.status}`);
+          
+          // If document shows recipient as signed, override Adobe Sign status
+          if (['signed', 'completed', 'approved'].includes(docRecipient.status.toLowerCase())) {
+            if (docParticipant.actualStatus !== 'SIGNED') {
+              logger.info(`✅ Overriding ${docRecipient.email} status to SIGNED based on document data`);
+              docParticipant.actualStatus = 'SIGNED';
+              docParticipant.canSign = false;
+              docParticipant.signedDetectedBy = 'document_status';
+            }
+          }
+        }
+      }
+      
+      // Update detection method to include document data
+      status.detectionMethod = status.detectionMethod + '_with_document_data';
+    }
     
-    if (status.signedParticipants.length > 0) {
-      logger.info('✅ Confirmed signed participants:');
-      status.signedParticipants.forEach(p => {
-        logger.info(`   - ${p.email} (order: ${p.order}) - detected by: ${p.signedDetectedBy || 'status'}`);
-      });
+    // Populate the final status object with processed participant data
+    for (const finalParticipant of participantSigningStatus) {
+      if (finalParticipant.actualStatus === 'SIGNED') {
+        status.signedParticipants.push(finalParticipant);
+      } else {
+        status.pendingParticipants.push(finalParticipant);
+        
+        // Identify current and next signer for sequential workflows
+        if (finalParticipant.canSign && finalParticipant.isCurrent) {
+          status.currentSigner = finalParticipant;
+        } else if (finalParticipant.actualStatus === 'WAITING' && !status.nextSigner) {
+          status.nextSigner = finalParticipant;
+        }
+      }
     }
-
-    if (status.pendingParticipants.length > 0) {
-      logger.info('⏳ Pending participants:');
-      status.pendingParticipants.forEach(p => {
-        const canSignText = p.canSign !== false ? 'can sign now' : 'waiting for others';
-        logger.info(`   - ${p.email} (order: ${p.order}) - ${canSignText}`);
-      });
+    
+    // Final check: ensure we have a current signer if there are pending participants
+    if (status.pendingParticipants.length > 0 && !status.currentSigner) {
+      // If we didn't mark anyone as current, use the first pending participant by order
+      const sortedPending = [...status.pendingParticipants].sort((a, b) => (a.order || 999) - (b.order || 999));
+      if (sortedPending.length > 0) {
+        status.currentSigner = sortedPending[0];
+        logger.info(`📌 Final adjustment: setting ${status.currentSigner.email} as current signer (order: ${status.currentSigner.order})`);
+      }
     }
-
+    
+    logger.info(`✅ Finished analyzing signing status. Detection method: ${status.detectionMethod}`);
+    logger.info(`📊 Results: ${status.signedParticipants.length} signed, ${status.pendingParticipants.length} pending`);
+    if (status.currentSigner) {
+      logger.info(`🎯 Current signer: ${status.currentSigner.email} (${status.currentSigner.name})`);
+    }
+    
     return status;
-
   } catch (error) {
     logger.error(`Error getting actual signing status: ${error.message}`);
-    return status;
+    throw new Error(`Failed to get actual signing status: ${error.message}`);
   }
 };
 
 /**
- * Get agreement events from Adobe Sign
+ * Get agreement events for an agreement
  * @param {string} accessToken - Adobe Sign access token
- * @param {string} agreementId - Agreement ID
- * @returns {Promise<Object>} - Agreement events
+ * @param {string} agreementId - Adobe Sign agreement ID
+ * @returns {Promise<Object>} - Agreement events information
  */
 const getAgreementEvents = async (accessToken, agreementId) => {
   try {
     logger.info(`Getting agreement events for: ${agreementId}`);
     
-    const client = await createAdobeSignClient();
-    const response = await client.get(`/agreements/${agreementId}/events`);
+    // Make sure we have the correct base URL
+    if (!adobeSignConfig.baseURL) {
+      await fetchApiAccessPoints();
+    }
     
-    logger.info(`Retrieved ${response.data.events?.length || 0} events`);
+    // Setup headers
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    };
+    
+    // Add API user email header if available
+    if (process.env.ADOBE_API_USER_EMAIL && process.env.ADOBE_API_USER_EMAIL !== 'your_email@example.com') {
+      headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
+    }
+    
+    // Get agreement events
+    const response = await axios.get(
+      `${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/events`,
+      { headers }
+    );
+    
+    logger.info(`Successfully retrieved agreement events for: ${agreementId}`);
     return response.data;
   } catch (error) {
     logger.error(`Error getting agreement events: ${error.message}`);
-    throw error;
+    if (error.response) {
+      logger.error(`Adobe Sign API error: ${JSON.stringify(error.response.data)}`);
+    }
+    throw new Error(`Failed to get agreement events: ${error.message}`);
   }
 };
 
 /**
- * Get agreement audit trail from Adobe Sign
+ * Get audit trail for an agreement
  * @param {string} accessToken - Adobe Sign access token
- * @param {string} agreementId - Agreement ID
- * @returns {Promise<Object>} - Agreement audit trail
+ * @param {string} agreementId - Adobe Sign agreement ID
+ * @returns {Promise<Object>} - Audit trail information
  */
 const getAgreementAuditTrail = async (accessToken, agreementId) => {
   try {
-    logger.info(`Getting agreement audit trail for: ${agreementId}`);
+    logger.info(`Getting audit trail for agreement: ${agreementId}`);
     
-    const client = await createAdobeSignClient();
-    const response = await client.get(`/agreements/${agreementId}/auditTrail`);
+    // Make sure we have the correct base URL
+    if (!adobeSignConfig.baseURL) {
+      await fetchApiAccessPoints();
+    }
     
-    logger.info('Retrieved agreement audit trail');
+    // Setup headers
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    };
+    
+    // Add API user email header if available
+    if (process.env.ADOBE_API_USER_EMAIL && process.env.ADOBE_API_USER_EMAIL !== 'your_email@example.com') {
+      headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
+    }
+    
+    // Get audit trail
+    const response = await axios.get(
+      `${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/auditTrail`,
+      { headers }
+    );
+    
+    logger.info(`Successfully retrieved audit trail for agreement: ${agreementId}`);
     return response.data;
   } catch (error) {
-    logger.error(`Error getting agreement audit trail: ${error.message}`);
-    throw error;
+    logger.error(`Error getting audit trail: ${error.message}`);
+    if (error.response) {
+      logger.error(`Adobe Sign API error: ${JSON.stringify(error.response.data)}`);
+    }
+    throw new Error(`Failed to get audit trail: ${error.message}`);
   }
 };
 
 /**
- * Get agreement form data from Adobe Sign
+ * Validate participant IDs against Adobe Sign
  * @param {string} accessToken - Adobe Sign access token
- * @param {string} agreementId - Agreement ID
- * @returns {Promise<Object>} - Agreement form data
+ * @param {string} agreementId - Adobe Sign agreement ID
+ * @param {Array<string>} participantIds - Array of participant IDs to validate
+ * @returns {Promise<Array<string>>} - Array of validated participant IDs
  */
-const getAgreementFormData = async (accessToken, agreementId) => {
-  try {
-    logger.info(`Getting agreement form data for: ${agreementId}`);
-    
-    const client = await createAdobeSignClient();
-    const response = await client.get(`/agreements/${agreementId}/formData`);
-    
-    logger.info('Retrieved agreement form data');
-    return response.data;
-  } catch (error) {
-    logger.error(`Error getting agreement form data: ${error.message}`);
-    throw error;
+const validateParticipantIds = async (accessToken, agreementId, participantIds) => {
+  if (!participantIds || participantIds.length === 0) {
+    return [];
   }
-};
-
-/**
- * Get enhanced agreement info with additional data
- * @param {string} accessToken - Adobe Sign access token
- * @param {string} agreementId - Agreement ID
- * @returns {Promise<Object>} - Enhanced agreement info
- */
-const getEnhancedAgreementInfo = async (accessToken, agreementId) => {
-  try {
-    logger.info(`Getting enhanced agreement info for: ${agreementId}`);
-    
-    // Get basic agreement info
-    const agreementInfo = await getComprehensiveAgreementInfo(accessToken, agreementId);
-    
-    // Get additional data to determine actual signing status
-    let events = null;
-    let auditTrail = null;
-    let formData = null;
-    
-    try {
-      events = await getAgreementEvents(accessToken, agreementId);
-      logger.info('Successfully retrieved agreement events');
-    } catch (error) {
-      logger.warn(`Could not get agreement events: ${error.message}`);
-    }
-    
-    try {
-      auditTrail = await getAgreementAuditTrail(accessToken, agreementId);
-      logger.info('Successfully retrieved agreement audit trail');
-    } catch (error) {
-      logger.warn(`Could not get agreement audit trail: ${error.message}`);
-    }
-    
-    try {
-      formData = await getAgreementFormData(accessToken, agreementId);
-      if (formData) {
-        logger.info('Successfully retrieved agreement form data');
-      }
-    } catch (error) {
-      logger.warn(`Could not get agreement form data: ${error.message}`);
-    }
-    
-    // Enhance participant status with actual signing information
-    if (agreementInfo && (events || auditTrail || formData)) {
-      agreementInfo.events = events;
-      agreementInfo.auditTrail = auditTrail;
-      agreementInfo.formData = formData;
-      
-      // Analyze actual signing status
-      const actualSigningStatus = analyzeActualSigningStatus(agreementInfo, events, auditTrail, formData);
-      agreementInfo.actualSigningStatus = actualSigningStatus;
-      
-      logger.info(`Enhanced agreement info with actual signing status: ${JSON.stringify(actualSigningStatus, null, 2)}`);
-    }
-    
-    return agreementInfo;
-  } catch (error) {
-    logger.error(`Error getting enhanced agreement info: ${error.message}`);
-    throw error;
-  }
-};
-
-/**
- * Analyze actual signing status from events, audit trail, and form data
- * @param {object} agreementInfo - Basic agreement info
- * @param {object} events - Agreement events
- * @param {object} auditTrail - Agreement audit trail
- * @param {object} formData - Agreement form data
- * @returns {object} - Analysis of actual signing status
- */
-const analyzeActualSigningStatus = (agreementInfo, events, auditTrail, formData) => {
-  const analysis = {
-    signedParticipants: [],
-    pendingParticipants: [],
-    currentSigner: null,
-    nextSigner: null
-  };
   
   try {
-    // Get participant emails from agreement info
-    const participantEmails = [];
-    if (agreementInfo && agreementInfo.participantSets) {
-      for (const participantSet of agreementInfo.participantSets) {
-        if (participantSet.role === 'SIGNER') {
-          for (const participant of participantSet.memberInfos) {
-            participantEmails.push({
-              email: participant.email,
-              order: participantSet.order,
-              participantId: participant.id
-            });
+    logger.info(`Validating ${participantIds.length} participant IDs for agreement: ${agreementId}`);
+    
+    // Get agreement info to validate participant IDs against actual participants
+    const agreementInfo = await getComprehensiveAgreementInfo(accessToken, agreementId);
+    const validatedIds = [];
+    
+    // Track which participants were found and which weren't
+    const foundIds = new Set();
+    
+    // First check main participant sets
+    if (agreementInfo?.participants?.participantSets) {
+      for (const participantSet of agreementInfo.participants.participantSets) {
+        for (const memberInfo of participantSet.memberInfos || []) {
+          if (participantIds.includes(memberInfo.id)) {
+            validatedIds.push(memberInfo.id);
+            foundIds.add(memberInfo.id);
+            logger.info(`Validated participant ID: ${memberInfo.id} for ${memberInfo.email}`);
           }
         }
       }
     }
     
-    logger.info(`Found ${participantEmails.length} signer participants to analyze`);
-    
-    // Analyze events for signing actions
-    const signingEvents = [];
-    if (events && events.events) {
-      for (const event of events.events) {
-        if (event.type && event.type.includes('SIGNATURE') && event.participantEmail) {
-          signingEvents.push({
-            email: event.participantEmail,
-            type: event.type,
-            date: event.date,
-            description: event.description
-          });
-          logger.info(`Found signing event: ${event.participantEmail} - ${event.type} at ${event.date}`);
+    // Check alternate participant locations in the agreement info
+    if (agreementInfo?.participantSets) {
+      for (const participantSet of agreementInfo.participantSets) {
+        for (const memberInfo of participantSet.memberInfos || []) {
+          if (participantIds.includes(memberInfo.id) && !foundIds.has(memberInfo.id)) {
+            validatedIds.push(memberInfo.id);
+            foundIds.add(memberInfo.id);
+            logger.info(`Validated participant ID from alternate location: ${memberInfo.id}`);
+          }
         }
       }
     }
     
-    // Analyze audit trail for completion status
-    const completedSigners = [];
-    if (auditTrail && typeof auditTrail === 'string') {
-      // Audit trail is often returned as a string/PDF content
-      // Look for signature completion patterns
-      for (const participant of participantEmails) {
-        if (auditTrail.includes(participant.email) && 
-            (auditTrail.includes('Signed') || auditTrail.includes('completed'))) {
-          completedSigners.push(participant.email);
-          logger.info(`Found completed signature in audit trail: ${participant.email}`);
-        }
+    // Log any IDs that weren't found
+    for (const id of participantIds) {
+      if (!foundIds.has(id)) {
+        logger.warn(`Participant ID not found in agreement: ${id}`);
       }
     }
     
-    // Determine current status for each participant
-    for (const participant of participantEmails) {
-      const hasSigned = signingEvents.some(event => 
-        event.email === participant.email && 
-        (event.type.includes('SIGNED') || event.type.includes('COMPLETED'))
-      ) || completedSigners.includes(participant.email);
-      
-      if (hasSigned) {
-        analysis.signedParticipants.push(participant);
-        logger.info(`Participant ${participant.email} has signed (order: ${participant.order})`);
-      } else {
-        analysis.pendingParticipants.push(participant);
-        logger.info(`Participant ${participant.email} is pending (order: ${participant.order})`);
-      }
-    }
-    
-    // Determine current signer (lowest order among pending)
-    if (analysis.pendingParticipants.length > 0) {
-      const sortedPending = analysis.pendingParticipants.sort((a, b) => (a.order || 999) - (b.order || 999));
-      analysis.currentSigner = sortedPending[0];
-      analysis.nextSigner = sortedPending[1] || null;
-      
-      logger.info(`Current signer: ${analysis.currentSigner?.email} (order: ${analysis.currentSigner?.order})`);
-      if (analysis.nextSigner) {
-        logger.info(`Next signer: ${analysis.nextSigner?.email} (order: ${analysis.nextSigner?.order})`);
-      }
-    }
-    
-    logger.info(`Signing analysis complete: ${analysis.signedParticipants.length} signed, ${analysis.pendingParticipants.length} pending`);
-    
+    logger.info(`Validated ${validatedIds.length} out of ${participantIds.length} participant IDs`);
+    return validatedIds;
   } catch (error) {
-    logger.error(`Error analyzing signing status: ${error.message}`);
+    logger.error(`Error validating participant IDs: ${error.message}`);
+    // Return original IDs as fallback
+    return participantIds;
   }
-  
-  return analysis;
 };
 
 module.exports = {
@@ -1197,17 +1397,15 @@ module.exports = {
   getAccessToken,
   fetchApiAccessPoints,
   uploadTransientDocument,
-  sendReminder,
   getAgreementInfo,
+  getComprehensiveAgreementInfo,
+  getActualSigningStatus,
+  sendReminder,
+  createWebhook,
   getSigningUrl,
   downloadSignedDocument,
-  createWebhook,
   validateAdobeSignConfig,
-  getComprehensiveAgreementInfo,
   getAgreementEvents,
   getAgreementAuditTrail,
-  getAgreementFormData,
-  getEnhancedAgreementInfo,
-  analyzeActualSigningStatus,
-  getActualSigningStatus
+  validateParticipantIds
 };

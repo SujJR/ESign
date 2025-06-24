@@ -1247,6 +1247,39 @@ exports.checkDocumentStatus = async (req, res, next) => {
       return next(new ApiError(400, 'Document has not been sent for signature yet'));
     }
     
+    // Helper function to get actual signing timestamp from agreement events
+    const getActualSigningTimestamp = (participantEmail, agreementEvents) => {
+      if (!agreementEvents || !agreementEvents.events) {
+        return null;
+      }
+      
+      // Look for various signing-related events
+      const signingEvents = agreementEvents.events.filter(event => {
+        const eventType = event.type?.toLowerCase() || '';
+        const matchesParticipant = event.participantEmail === participantEmail;
+        
+        // Check for various signing completion events
+        return matchesParticipant && (
+          event.type === 'ESIGNED' || 
+          event.type === 'ACTION_COMPLETED' ||
+          event.type === 'SIGNED' ||
+          eventType.includes('signed') || 
+          eventType.includes('completed') || 
+          eventType.includes('approved') ||
+          eventType.includes('accepted')
+        );
+      });
+      
+      if (signingEvents.length > 0) {
+        // Use the most recent signing event
+        const mostRecentSigningEvent = signingEvents.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+        logger.info(`Found signing timestamp for ${participantEmail}: ${mostRecentSigningEvent.date} (event: ${mostRecentSigningEvent.type})`);
+        return new Date(mostRecentSigningEvent.date);
+      }
+      
+      return null;
+    };
+
     try {
       // Get Adobe Sign client (async)
       const adobeSignClient = await createAdobeSignClient();
@@ -1299,16 +1332,28 @@ exports.checkDocumentStatus = async (req, res, next) => {
       
       // Update recipients status using multiple data sources
       if (agreementResponse.data.participantSetsInfo) {
+        // First, check if Adobe Sign overall status is SIGNED/COMPLETED but participants still show as ACTIVE
+        const overallStatus = agreementResponse.data.status;
+        const isAgreementCompleted = overallStatus === 'SIGNED' || overallStatus === 'COMPLETED';
+        
         agreementResponse.data.participantSetsInfo.forEach(participantSet => {
           participantSet.memberInfos.forEach(member => {
             const recipient = document.recipients.find(r => r.email === member.email);
             
             if (recipient) {
               // Log the member status for debugging
-              logger.info(`Checking recipient ${member.email} - Adobe Sign status: ${member.status}`);
+              logger.info(`Checking recipient ${member.email} - Adobe Sign status: ${member.status}, Overall agreement status: ${overallStatus}`);
               
               // Store the previous status to detect changes
               const previousStatus = recipient.status;
+              
+              // SPECIAL HANDLING: If agreement is completed but participant shows as ACTIVE
+              // This is a common Adobe Sign timing issue
+              let effectiveMemberStatus = member.status;
+              if (isAgreementCompleted && member.status === 'ACTIVE') {
+                logger.info(`⚠️ Agreement is ${overallStatus} but ${member.email} shows ACTIVE - treating as SIGNED`);
+                effectiveMemberStatus = 'SIGNED';
+              }
               
               // Check if this recipient has actually signed by looking at different data sources
               let hasActuallySigned = false;
@@ -1346,33 +1391,34 @@ exports.checkDocumentStatus = async (req, res, next) => {
               
               // Method 2: Check agreement events for ESIGNED events
               if (agreementEvents && agreementEvents.events) {
-                const signatureEvents = agreementEvents.events.filter(event => 
-                  event.type === 'ESIGNED' && 
-                  event.participantEmail === member.email
-                );
+                const actualSigningDate = getActualSigningTimestamp(member.email, agreementEvents);
                 
-                if (signatureEvents.length > 0) {
+                if (actualSigningDate) {
                   hasActuallySigned = true;
-                  logger.info(`Recipient ${member.email} has ESIGNED event in agreement events`);
+                  logger.info(`Recipient ${member.email} has signing event in agreement events`);
                   
-                  // Update signedAt timestamp from the event
-                  if (!recipient.signedAt && signatureEvents[0].date) {
-                    recipient.signedAt = new Date(signatureEvents[0].date);
-                    logger.info(`Updated signedAt timestamp for ${member.email} from event data`);
+                  // Update signedAt timestamp from the event - use the actual signing date
+                  if (!recipient.signedAt) {
+                    recipient.signedAt = actualSigningDate;
+                    logger.info(`Updated signedAt timestamp for ${member.email} from event data: ${actualSigningDate}`);
                   }
                 }
               }
               
-              // Method 3: Check Adobe Sign status directly
+              // Method 3: Check Adobe Sign status directly (using effective status)
               // IMPORTANT: This is a critical check for the "stays active" issue
-              if (member.status === 'SIGNED') {
+              if (effectiveMemberStatus === 'SIGNED') {
                 hasActuallySigned = true;
-                logger.info(`Recipient ${member.email} has SIGNED status in Adobe Sign`);
+                logger.info(`Recipient ${member.email} has SIGNED status in Adobe Sign (effective: ${effectiveMemberStatus}, actual: ${member.status})`);
                 
                 // Update signedAt if we don't have it yet
                 if (!recipient.signedAt) {
-                  recipient.signedAt = new Date();
-                  logger.info(`Set signedAt timestamp for ${member.email} based on SIGNED status`);
+                  // Try to get the actual signing date from agreement events first
+                  const actualSigningDate = getActualSigningTimestamp(member.email, agreementEvents);
+                  
+                  // If we found an actual signing date, use it; otherwise use current time as fallback
+                  recipient.signedAt = actualSigningDate || new Date();
+                  logger.info(`Set signedAt timestamp for ${member.email}: ${recipient.signedAt} (${actualSigningDate ? 'from events' : 'current time fallback'})`);
                 }
               }
               
@@ -1386,19 +1432,22 @@ exports.checkDocumentStatus = async (req, res, next) => {
               if (hasActuallySigned) {
                 recipient.status = 'signed';
                 if (!recipient.signedAt) {
-                  recipient.signedAt = new Date();
+                  // Try to get the actual signing date from agreement events
+                  const actualSigningDate = getActualSigningTimestamp(member.email, agreementEvents);
+                  recipient.signedAt = actualSigningDate || new Date();
                 }
-                logger.info(`✅ Recipient ${member.email} confirmed as SIGNED`);
+                logger.info(`✅ Recipient ${member.email} confirmed as SIGNED at ${recipient.signedAt}`);
               } else {
-                // They haven't actually signed yet
-                switch (member.status) {
+                // They haven't actually signed yet - use effective status for decision making
+                switch (effectiveMemberStatus) {
                   case 'SIGNED':
-                    // Adobe says signed but we found no evidence - this shouldn't happen
-                    // But we'll trust Adobe Sign in this case
-                    logger.warn(`⚠️ Adobe Sign says ${member.email} is SIGNED but no signature evidence found`);
+                    // Adobe says signed (or we determined it should be signed)
+                    logger.info(`Setting ${member.email} as signed based on effective status (actual: ${member.status}, effective: ${effectiveMemberStatus})`);
                     recipient.status = 'signed';
                     if (!recipient.signedAt) {
-                      recipient.signedAt = new Date();
+                      // Try to get the actual signing date from agreement events
+                      const actualSigningDate = getActualSigningTimestamp(member.email, agreementEvents);
+                      recipient.signedAt = actualSigningDate || new Date();
                     }
                     break;
                   case 'REJECTED':
@@ -1421,9 +1470,11 @@ exports.checkDocumentStatus = async (req, res, next) => {
                     if (hasActuallySigned) {
                       recipient.status = 'signed';
                       if (!recipient.signedAt) {
-                        recipient.signedAt = new Date();
+                        // Try to get the actual signing date from agreement events
+                        const actualSigningDate = getActualSigningTimestamp(member.email, agreementEvents);
+                        recipient.signedAt = actualSigningDate || new Date();
                       }
-                      logger.info(`⚠️ Recipient ${member.email} shows ACTIVE but evidence indicates SIGNED - correcting status`);
+                      logger.info(`⚠️ Recipient ${member.email} shows ACTIVE but evidence indicates SIGNED - correcting status, signed at: ${recipient.signedAt}`);
                     } else {
                       // Check if we have a form field signature but Adobe Sign doesn't know yet
                       if (formFieldData && Array.isArray(formFieldData)) {
@@ -1438,9 +1489,11 @@ exports.checkDocumentStatus = async (req, res, next) => {
                           // They actually signed based on form data
                           recipient.status = 'signed';
                           if (!recipient.signedAt) {
-                            recipient.signedAt = new Date();
+                            // Try to get the actual signing date from agreement events
+                            const actualSigningDate = getActualSigningTimestamp(member.email, agreementEvents);
+                            recipient.signedAt = actualSigningDate || new Date();
                           }
-                          logger.info(`⚠️ Recipient ${member.email} shows ACTIVE but form field evidence indicates SIGNED - correcting status`);
+                          logger.info(`⚠️ Recipient ${member.email} shows ACTIVE but form field evidence indicates SIGNED - correcting status, signed at: ${recipient.signedAt}`);
                         } else {
                           recipient.status = 'sent';
                           logger.info(`📝 Recipient ${member.email} is ACTIVE and ready to sign`);
@@ -1464,7 +1517,7 @@ exports.checkDocumentStatus = async (req, res, next) => {
                     recipient.status = 'sent';
                     break;
                   default:
-                    logger.warn(`Unknown Adobe Sign status for ${member.email}: ${member.status}`);
+                    logger.warn(`Unknown Adobe Sign status for ${member.email}: ${effectiveMemberStatus} (actual: ${member.status})`);
                     recipient.status = 'sent'; // Default to sent for unknown statuses
                     break;
                 }
