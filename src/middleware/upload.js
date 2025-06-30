@@ -51,11 +51,12 @@ const upload = multer({
 // Middleware for single file upload
 exports.uploadDocument = upload.single('document');
 
-// Middleware for document with optional JSON data
+// Middleware for document with optional JSON data (supports all 3 methods)
 exports.uploadDocumentWithData = upload.fields([
   { name: 'document', maxCount: 1 },
   { name: 'documents', maxCount: 1 }, // Support both singular and plural
-  { name: 'data', maxCount: 1 }
+  { name: 'data', maxCount: 1 },      // Method 1: Single JSON file
+  { name: 'jsonData', maxCount: 10 }  // Method 2: Multiple JSON files
 ]);
 
 // Middleware for document with multiple JSON data files

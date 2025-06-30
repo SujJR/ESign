@@ -4,12 +4,77 @@ const path = require('path');
 const logger = require('./logger');
 
 /**
+ * Check if a file has a valid PDF header
+ * @param {Buffer} buffer - File buffer to check
+ * @returns {boolean} - True if file has PDF header
+ */
+const isPdfFile = (buffer) => {
+  // PDF files start with %PDF-
+  const pdfHeader = Buffer.from('%PDF-');
+  return buffer.subarray(0, 5).equals(pdfHeader);
+};
+
+/**
+ * Get file type information
+ * @param {string} filePath - Path to the file
+ * @returns {object} - File type information
+ */
+const getFileInfo = (filePath) => {
+  const stats = fs.statSync(filePath);
+  const buffer = fs.readFileSync(filePath, { start: 0, end: 10 }); // Read first 10 bytes
+  const extension = path.extname(filePath).toLowerCase();
+  
+  return {
+    size: stats.size,
+    extension,
+    isPdf: isPdfFile(buffer),
+    filename: path.basename(filePath)
+  };
+};
+
+/**
  * Read a PDF file and extract information
  * @param {string} filePath - Path to the PDF file
  * @returns {Promise<object>} - PDF document information
  */
 const analyzePdf = async (filePath) => {
   try {
+    // Validate input
+    if (!filePath) {
+      throw new Error('File path is required');
+    }
+    
+    if (typeof filePath !== 'string') {
+      throw new Error('File path must be a string');
+    }
+    
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File does not exist: ${filePath}`);
+    }
+    
+    // Get file information
+    const fileInfo = getFileInfo(filePath);
+    logger.info(`Analyzing file: ${filePath}`, {
+      size: fileInfo.size,
+      extension: fileInfo.extension,
+      isPdf: fileInfo.isPdf
+    });
+    
+    // Validate file type
+    if (!fileInfo.isPdf) {
+      throw new Error(`File is not a valid PDF. Extension: ${fileInfo.extension}, Has PDF header: ${fileInfo.isPdf}`);
+    }
+    
+    // Additional validation for file size
+    if (fileInfo.size === 0) {
+      throw new Error('File is empty');
+    }
+    
+    if (fileInfo.size < 10) {
+      throw new Error('File is too small to be a valid PDF');
+    }
+    
     const pdfBytes = fs.readFileSync(filePath);
     const pdfDoc = await PDFDocument.load(pdfBytes);
     
@@ -80,5 +145,7 @@ const getPdfPageCount = async (filePath) => {
 module.exports = {
   analyzePdf,
   saveFile,
-  getPdfPageCount
+  getPdfPageCount,
+  getFileInfo,
+  isPdfFile
 };

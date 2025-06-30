@@ -93,10 +93,20 @@ const handleSigningComplete = async (eventData) => {
       
       if (recipientIndex !== -1) {
         // Update recipient status
+        const oldStatus = document.recipients[recipientIndex].status;
         document.recipients[recipientIndex].status = 'signed';
-        document.recipients[recipientIndex].signedAt = new Date();
         
-        logger.info(`Updated signing status for ${participantEmail} to signed`);
+        // Always update signedAt timestamp when someone signs
+        if (!document.recipients[recipientIndex].signedAt) {
+          document.recipients[recipientIndex].signedAt = new Date();
+          logger.info(`Set signedAt timestamp for ${participantEmail} via webhook`);
+        }
+        
+        // Also update lastSigningUrlAccessed since they accessed the document to sign
+        document.recipients[recipientIndex].lastSigningUrlAccessed = new Date();
+        
+        logger.info(`Updated signing status for ${participantEmail}: ${oldStatus} → signed`);
+        logger.info(`Updated timestamps - signedAt: ${document.recipients[recipientIndex].signedAt}, lastAccessed: ${document.recipients[recipientIndex].lastSigningUrlAccessed}`);
       } else {
         logger.warn(`Recipient ${participantEmail} not found in document`);
       }

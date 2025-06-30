@@ -305,6 +305,100 @@ Please do not reply to this email.
   }
 
   /**
+   * Send signature reminder using Adobe Sign API or email
+   * @param {Object} options - Reminder options (flexible parameter structure)
+   * @param {string} options.agreementId - Adobe Sign agreement ID (if available)
+   * @param {string} options.recipientEmail - Recipient email
+   * @param {string} options.recipientName - Recipient name
+   * @param {string} options.documentName - Document name
+   * @param {string} options.message - Custom reminder message
+   * @param {string} options.signingUrl - Direct signing URL (optional)
+   * @param {string} options.senderName - Sender name (optional)
+   * @returns {Promise<Object>} - Reminder result
+   */
+  async sendSignatureReminder(options) {
+    const { 
+      agreementId, 
+      recipientEmail, 
+      recipientName, 
+      documentName, 
+      message, 
+      signingUrl, 
+      senderName 
+    } = options;
+    
+    // If we have an agreementId, try Adobe Sign API first
+    if (agreementId) {
+      try {
+        const { getAccessToken, sendReminder } = require('../config/adobeSign');
+        const accessToken = await getAccessToken();
+        
+        const reminderResult = await sendReminder(
+          accessToken, 
+          agreementId, 
+          message || 'Please complete your signature for this important document.'
+        );
+        
+        logger.info(`✅ Adobe Sign API reminder sent to ${recipientEmail} for agreement ${agreementId}`);
+        
+        return {
+          success: true,
+          method: 'adobe_sign_api',
+          agreementId,
+          recipient: recipientEmail,
+          messageId: reminderResult.id || 'adobe_sign_reminder'
+        };
+        
+      } catch (adobeError) {
+        logger.warn(`Adobe Sign API reminder failed for ${recipientEmail}: ${adobeError.message}`);
+        // Continue to email fallback
+      }
+    }
+    
+    // Use email reminder (either as fallback or primary method)
+    if (this.isConfigured) {
+      try {
+        const emailResult = await this.sendReminderEmail({
+          to: recipientEmail,
+          recipientName: recipientName || recipientEmail.split('@')[0],
+          documentName: documentName || 'Document',
+          message: message || 'Please complete your signature for this important document.',
+          signingUrl: signingUrl || null
+        });
+        
+        if (emailResult.success) {
+          logger.info(`✅ Email reminder sent to ${recipientEmail} for document: ${documentName}`);
+          return {
+            success: true,
+            method: agreementId ? 'email_fallback' : 'email_primary',
+            recipient: recipientEmail,
+            messageId: emailResult.messageId,
+            note: agreementId ? 'Adobe Sign API failed, used email fallback' : 'Email reminder sent'
+          };
+        } else {
+          throw new Error(emailResult.error);
+        }
+        
+      } catch (emailError) {
+        logger.error(`Email reminder failed for ${recipientEmail}: ${emailError.message}`);
+        return {
+          success: false,
+          error: `Email reminder failed: ${emailError.message}`,
+          recipient: recipientEmail
+        };
+      }
+    } else {
+      // No reminder method available
+      logger.error(`No reminder method available for ${recipientEmail} - ${agreementId ? 'Adobe Sign API failed and ' : ''}email service not configured`);
+      return {
+        success: false,
+        error: `${agreementId ? 'Adobe Sign API failed and ' : ''}Email service not configured`,
+        recipient: recipientEmail
+      };
+    }
+  }
+
+  /**
    * Test email configuration
    * @returns {Promise<Object>} - Test result
    */

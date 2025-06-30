@@ -21,7 +21,6 @@
     "test-enhanced": "node test-enhanced-signature.js",
     "test-enhanced-features": "node test-enhanced-features.js",
     "debug-reminder": "node debug-reminder-logic.js",
-    "debug-reminder": "node debug-reminder-logic.js",
     "debug-sequential-signing": "node debug-sequential-signing-detection.js",
     "test-all-active": "node test-all-active-issue.js",
     "test-reminder": "node test-enhanced-reminder.js"
@@ -31,6 +30,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "axios": "^1.9.0",
     "axios-retry": "^4.5.0",
     "cors": "^2.8.5",

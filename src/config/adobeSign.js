@@ -457,9 +457,9 @@ const getAgreementInfo = async (accessToken, agreementId) => {
  * @param {string} participantId - Participant ID
  * @returns {Promise<Object>} - Signing URL info
  */
-const getSigningUrl = async (accessToken, agreementId, participantId) => {
+const getSigningUrl = async (accessToken, agreementId, participantEmailOrId) => {
   try {
-    logger.info(`Getting signing URL for participant ${participantId} in agreement: ${agreementId}`);
+    logger.info(`Getting signing URL for participant ${participantEmailOrId} in agreement: ${agreementId}`);
     
     // Make sure we have the correct base URL
     if (!adobeSignConfig.baseURL) {
@@ -477,13 +477,26 @@ const getSigningUrl = async (accessToken, agreementId, participantId) => {
       headers['x-api-user'] = 'email:' + process.env.ADOBE_API_USER_EMAIL;
     }
     
-    // Get signing URL
-    const response = await axios.get(
-      `${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/signingUrls?participantId=${participantId}`,
-      { headers }
-    );
+    // Build URL - if participantEmailOrId looks like an email, use participantEmail parameter
+    let url = `${adobeSignConfig.baseURL}api/rest/v6/agreements/${agreementId}/signingUrls`;
     
-    logger.info(`Successfully retrieved signing URL for participant: ${participantId}`);
+    if (participantEmailOrId && participantEmailOrId.includes('@')) {
+      // It's an email address
+      url += `?participantEmail=${encodeURIComponent(participantEmailOrId)}`;
+      logger.info(`Using participantEmail parameter: ${participantEmailOrId}`);
+    } else if (participantEmailOrId) {
+      // It might be a participant ID (though this seems less reliable)
+      url += `?participantId=${participantEmailOrId}`;
+      logger.info(`Using participantId parameter: ${participantEmailOrId}`);
+    } else {
+      // No parameter - get all signing URLs
+      logger.info('Getting all signing URLs for agreement');
+    }
+    
+    // Get signing URL
+    const response = await axios.get(url, { headers });
+    
+    logger.info(`Successfully retrieved signing URL response for: ${participantEmailOrId || 'all participants'}`);
     return response.data;
   } catch (error) {
     logger.error(`Error getting signing URL: ${error.message}`);

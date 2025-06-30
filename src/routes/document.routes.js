@@ -9,30 +9,14 @@ const router = express.Router();
 // Apply API key authentication to all routes
 router.use(authenticateApiKey);
 
-// Upload document
-router.post('/upload', requirePermissions(['documents:write', 'admin:all']), uploadDocument, handleMulterErrors, documentController.uploadDocument);
-
-// Upload document with JSON data for template processing
-router.post('/upload-with-data', requirePermissions(['documents:write', 'admin:all']), uploadDocumentWithData, handleMulterErrors, documentController.uploadDocumentWithData);
-
-// Upload document from URL with JSON data
-router.post('/upload-from-url', 
-  requirePermissions(['documents:write', 'admin:all']), 
-  uploadDocumentFromUrl,
-  handleMulterErrors, 
-  documentController.uploadDocumentFromUrl);
+// Combined upload, prepare, and send endpoint (supports all 3 methods)
+router.post('/upload-and-send', requirePermissions(['documents:send', 'documents:write', 'admin:all']), uploadDocumentWithData, handleMulterErrors, documentController.uploadPrepareAndSend);
 
 // Get all documents for user
 router.get('/', requirePermissions(['documents:read', 'admin:all']), documentController.getDocuments);
 
 // Get specific document
 router.get('/:id', requirePermissions(['documents:read', 'admin:all']), documentController.getDocument);
-
-// Prepare document for signature
-router.post('/:id/prepare', requirePermissions(['documents:write', 'admin:all']), documentController.prepareForSignature);
-
-// Send document for signature
-router.post('/:id/send', requirePermissions(['documents:send', 'admin:all']), documentController.sendForSignature);
 
 // Send reminder to recipients who haven't signed yet
 router.post('/:id/send-reminder', requirePermissions(['documents:send', 'admin:all']), documentController.sendReminder);
@@ -48,6 +32,9 @@ router.get('/:id/status', requirePermissions(['documents:read', 'admin:all']), d
 
 // Update signature status
 router.post('/:id/update-status', requirePermissions(['documents:write', 'admin:all']), documentController.updateSignatureStatus);
+
+// Manually update recipient timestamps (fallback when Adobe Sign sync fails)
+router.post('/:id/update-timestamps', requirePermissions(['documents:write', 'admin:all']), documentController.updateRecipientTimestamps);
 
 // Recover document from socket hang up error
 router.post('/:id/recover', requirePermissions(['documents:write', 'admin:all']), documentControllerAdditions.recoverDocument);

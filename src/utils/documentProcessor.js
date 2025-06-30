@@ -10,6 +10,7 @@ const docxtemplater = require('docxtemplater');
 const PizZip = require('pizzip');
 const libre = require('libreoffice-convert');
 const util = require('util');
+const pdfParse = require('pdf-parse');
 const logger = require('./logger');
 
 // Promisify the libre convert function
@@ -100,17 +101,17 @@ const processDocxTemplate = async (filePath, data) => {
         
         // Default parser for regular template variables
         return {
-          get: function() { return tag; }
+          get: function(scope, context) { 
+            // Return the value from the data object
+            return scope[tag] || tag; 
+          }
         };
       }
     });
     
-    // Set the template variables
-    doc.setData(data);
-    
     try {
-      // Render the document (replace all variables)
-      doc.render();
+      // Set the template variables and render using modern API
+      doc.render(data);
     } catch (error) {
       logger.error('Template rendering error:', error);
       
@@ -141,7 +142,7 @@ const processDocxTemplate = async (filePath, data) => {
       
       throw new Error(`Template processing failed: ${error.message}`);
     }
-    
+
     // Get the processed document buffer
     const buffer = doc.getZip().generate({ type: 'nodebuffer' });
     
@@ -398,13 +399,14 @@ const extractTextContent = async (filePath) => {
  */
 const extractTemplateVariables = (content) => {
   try {
-    // Match variables in curly braces: {variable} or {{variable}}
-    const variableRegex = /\{\{?([^}]+)\}?\}/g;
     const variables = [];
     const adobeSignTags = [];
+    
+    // Match variables in curly braces: {variable} or {{variable}}
+    const curlyVariableRegex = /\{\{?([^}]+)\}?\}/g;
     let match;
     
-    while ((match = variableRegex.exec(content)) !== null) {
+    while ((match = curlyVariableRegex.exec(content)) !== null) {
       const variableName = match[1].trim();
       // Check for Adobe Sign signature tags (expanded patterns)
       if ((variableName.includes('sig_es_:signer') || 
@@ -418,6 +420,23 @@ const extractTemplateVariables = (content) => {
       } 
       // Filter out common non-template patterns for regular variables
       else if (!variableName.includes('*') && !variableName.includes(':') && variableName.length > 0) {
+        if (!variables.includes(variableName)) {
+          variables.push(variableName);
+        }
+      }
+    }
+    
+    // ALSO match variables in square brackets: [variable]
+    const bracketVariableRegex = /\[([^\]]+)\]/g;
+    while ((match = bracketVariableRegex.exec(content)) !== null) {
+      const variableName = match[1].trim();
+      // Exclude common non-template square bracket content
+      if (!variableName.includes('*') && 
+          !variableName.includes(':') && 
+          !variableName.toLowerCase().includes('optional') &&
+          !variableName.toLowerCase().includes('required') &&
+          variableName.length > 0 && 
+          variableName.length < 100) { // Reasonable length limit
         if (!variables.includes(variableName)) {
           variables.push(variableName);
         }
@@ -945,15 +964,36 @@ const analyzeDocumentForSignatureFields = async (filePath) => {
       }
       
     } else if (fileExtension === '.pdf') {
-      // For PDF files, we can do basic text extraction
+      // For PDF files, extract text and look for template variables
       try {
-        // This is a simplified approach - in production you might want to use pdf-parse
-        templateVariables = [];
-        signatureFields = ['Signature', 'Date']; // Default assumption for PDFs
-        logger.info('PDF analysis complete with default signature fields');
+        // Extract text content using our PDF parser
+        textContent = await extractTextFromPdf(filePath);
+        
+        // Extract template variables from the PDF text
+        templateVariables = extractTemplateVariables(textContent);
+        
+        // Detect signature fields in the PDF text
+        signatureFields = detectExistingSignatureFields(textContent, '');
+        
+        // Fallback to basic detection if no existing fields found
+        if (signatureFields.length === 0) {
+          signatureFields = detectSignatureFields(textContent, '');
+        }
+        
+        // If still no signature fields detected, use default assumptions
+        if (signatureFields.length === 0) {
+          signatureFields = ['Signature', 'Date'];
+        }
+        
+        logger.info(`PDF analysis complete: ${templateVariables.length} variables, ${signatureFields.length} signature fields`);
+        if (templateVariables.length > 0) {
+          logger.info(`PDF template variables found: ${templateVariables.join(', ')}`);
+        }
+        
       } catch (pdfError) {
         logger.warn(`Could not analyze PDF: ${pdfError.message}`);
         signatureFields = ['Signature', 'Date'];
+        templateVariables = [];
       }
     }
 
@@ -1186,12 +1226,18 @@ const containsAdobeSignTags = async (filePath) => {
  */
 const extractTextFromPdf = async (filePath) => {
   try {
-    // This is a placeholder - in production, you would use a proper PDF parsing library
-    // such as pdf-parse or pdf.js
     logger.info(`Extracting text from PDF: ${filePath}`);
     
-    // For now, return empty string - in production implementation, this would extract actual text
-    return ''; 
+    // Read the PDF file as a buffer
+    const dataBuffer = fs.readFileSync(filePath);
+    
+    // Parse the PDF and extract text
+    const data = await pdfParse(dataBuffer);
+    
+    logger.info(`Successfully extracted ${data.text.length} characters from PDF`);
+    logger.debug(`PDF text preview: ${data.text.substring(0, 200)}...`);
+    
+    return data.text;
   } catch (error) {
     logger.error(`Error extracting text from PDF: ${error.message}`);
     return '';
@@ -1292,6 +1338,242 @@ const identifyFileFormat = async (filePath) => {
   }
 };
 
+/**
+ * Process PDF template variables using PDF text replacement
+ * @param {string} pdfPath - Path to the PDF file
+ * @param {Object} templateData - Data for variable substitution
+ * @returns {Promise<string>} - Path to the processed PDF
+ */
+const processPdfTemplate = async (pdfPath, templateData = {}) => {
+  try {
+    logger.info('Starting PDF template processing...');
+    
+    // First, extract text content to see what variables exist
+    const textContent = await extractTextFromPdf(pdfPath);
+    
+    // Find all template variables in multiple formats
+    // Support both {variableName} and [variableName] formats
+    const curlyMatches = textContent.match(/\{[^}]+\}/g) || [];
+    const bracketMatches = textContent.match(/\[[^\]]+\]/g) || [];
+    const foundVariables = [...new Set([...curlyMatches, ...bracketMatches])];
+    
+    logger.info(`Found ${foundVariables.length} template variables in PDF:`, foundVariables);
+    
+    if (foundVariables.length === 0) {
+      logger.info('No template variables found in PDF, returning original file');
+      return pdfPath;
+    }
+    
+    // Check if we have values for the found variables
+    let hasReplacements = false;
+    const replacements = {};
+    
+    for (const variable of foundVariables) {
+      // Handle both {variableName} and [variableName] formats
+      let varName;
+      if (variable.startsWith('{') && variable.endsWith('}')) {
+        varName = variable.slice(1, -1); // Remove { and }
+      } else if (variable.startsWith('[') && variable.endsWith(']')) {
+        varName = variable.slice(1, -1); // Remove [ and ]
+      } else {
+        continue; // Skip unknown formats
+      }
+      
+      if (templateData[varName] !== undefined) {
+        hasReplacements = true;
+        replacements[variable] = templateData[varName];
+        logger.info(`Will replace ${variable} with: ${templateData[varName]}`);
+      } else {
+        logger.warn(`No value found for variable: ${variable}`);
+      }
+    }
+    
+    if (!hasReplacements) {
+      logger.info('No matching template data found for PDF variables, returning original file');
+      return pdfPath;
+    }
+    
+    // Use a working PDF text replacement approach
+    return await processPdfWithHummusWriter(pdfPath, replacements);
+    
+  } catch (error) {
+    logger.error(`Error processing PDF template: ${error.message}`);
+    // If PDF processing fails, return original file rather than failing entirely
+    logger.warn('Falling back to original PDF due to processing error');
+    return pdfPath;
+  }
+};
+
+/**
+ * Process PDF using a clean document replacement approach
+ * @param {string} pdfPath - Path to the PDF file
+ * @param {Object} replacements - Object mapping variables to their replacement values
+ * @returns {Promise<string>} - Path to the processed PDF
+ */
+const processPdfWithHummusWriter = async (pdfPath, replacements) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Create output filename
+    const ext = path.extname(pdfPath);
+    const baseName = path.basename(pdfPath, ext);
+    const dirName = path.dirname(pdfPath);
+    const outputPath = path.join(dirName, `${baseName}_processed${ext}`);
+    
+    // Get the original PDF text content
+    const originalText = await extractTextFromPdf(pdfPath);
+    
+    // Replace all variables in the text
+    let processedText = originalText;
+    Object.entries(replacements).forEach(([variable, value]) => {
+      const regex = new RegExp(escapeRegex(variable), 'g');
+      processedText = processedText.replace(regex, value);
+      logger.info(`Replaced all occurrences of ${variable} with: ${value}`);
+    });
+    
+    // Clean the text more aggressively to handle encoding issues
+    processedText = processedText
+      .replace(/\r\n/g, ' ')  // Replace CRLF with space
+      .replace(/\r/g, ' ')    // Replace CR with space
+      .replace(/\n/g, ' ')    // Replace LF with space
+      .replace(/\s+/g, ' ')   // Collapse multiple spaces
+      .trim();
+    
+    // Create a clean, properly formatted PDF with the processed content
+    try {
+      const PDFLib = require('pdf-lib');
+      
+      const pdfDoc = await PDFLib.PDFDocument.create();
+      
+      // Use standard fonts that don't have encoding issues
+      const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+      const boldFont = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+      
+      let currentPage = pdfDoc.addPage([612, 792]); // Standard letter size
+      
+      const margin = 60;
+      const pageWidth = 612;
+      const maxLineWidth = pageWidth - (margin * 2);
+      let yPosition = 732; // Start near top with some margin
+      
+      // Split text into words for manual line wrapping
+      const words = processedText.split(' ').filter(word => word.trim());
+      let currentLine = '';
+      let isFirstLine = true;
+      
+      for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        const textWidth = font.widthOfTextAtSize(testLine, 11);
+        
+        if (textWidth > maxLineWidth && currentLine) {
+          // Draw current line
+          if (yPosition < margin + 20) {
+            currentPage = pdfDoc.addPage([612, 792]);
+            yPosition = 732;
+          }
+          
+          currentPage.drawText(currentLine, {
+            x: margin,
+            y: yPosition,
+            size: isFirstLine ? 14 : 11,
+            font: isFirstLine ? boldFont : font
+          });
+          
+          yPosition -= isFirstLine ? 20 : 16;
+          isFirstLine = false;
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      
+      // Draw the last line
+      if (currentLine) {
+        if (yPosition < margin + 20) {
+          currentPage = pdfDoc.addPage([612, 792]);
+          yPosition = 732;
+        }
+        
+        currentPage.drawText(currentLine, {
+          x: margin,
+          y: yPosition,
+          size: isFirstLine ? 14 : 11,
+          font: isFirstLine ? boldFont : font
+        });
+      }
+      
+      // Add a footer note about template processing
+      if (yPosition < 60) {
+        currentPage = pdfDoc.addPage([612, 792]);
+      }
+      
+      currentPage.drawText('Template variables have been processed and replaced with actual values.', {
+        x: margin,
+        y: 30,
+        size: 8,
+        font: font,
+        opacity: 0.7
+      });
+      
+      const pdfBytes = await pdfDoc.save();
+      fs.writeFileSync(outputPath, pdfBytes);
+      
+      logger.info(`Clean PDF created with variable replacements: ${outputPath}`);
+      return outputPath;
+      
+    } catch (pdfError) {
+      logger.error(`PDF creation error: ${pdfError.message}`);
+      throw pdfError;
+    }
+    
+  } catch (error) {
+    logger.error(`Error in PDF processing: ${error.message}`);
+    throw error;
+  }
+};
+
+/**
+ * Helper function to wrap text to fit within specified width
+ * @param {string} text - Text to wrap
+ * @param {number} maxWidth - Maximum width in points
+ * @param {Object} font - PDF font object
+ * @param {number} fontSize - Font size
+ * @returns {Array<string>} - Array of wrapped lines
+ */
+const wrapText = (text, maxWidth, font, fontSize) => {
+  const words = text.split(' ');
+  const lines = [];
+  let currentLine = '';
+  
+  for (const word of words) {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    const textWidth = font.widthOfTextAtSize(testLine, fontSize);
+    
+    if (textWidth > maxWidth && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  }
+  
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+  
+  return lines;
+};
+
+/**
+ * Helper function to escape special regex characters
+ * @param {string} string - String to escape
+ * @returns {string} - Escaped string
+ */
+const escapeRegex = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 module.exports = {
   processDocumentTemplate,
   processDocxTemplate,
@@ -1311,5 +1593,6 @@ module.exports = {
   detectAdobeSignTags,
   extractTextFromPdf,
   normalizeAdobeSignTags,
-  identifyFileFormat
+  identifyFileFormat,
+  processPdfTemplate
 };

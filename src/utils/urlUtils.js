@@ -4,6 +4,61 @@ const path = require('path');
 const logger = require('./logger');
 
 /**
+ * Converts Google Docs/Sheets/Slides URLs to direct download URLs
+ * @param {string} url - The Google Docs URL
+ * @returns {string} - Direct download URL or original URL if not a Google Docs URL
+ */
+const convertGoogleDocsUrl = (url) => {
+  try {
+    // Check if it's a Google Docs URL
+    if (url.includes('docs.google.com/document')) {
+      // Extract the document ID from the URL
+      const docIdMatch = url.match(/\/document\/d\/([a-zA-Z0-9-_]+)/);
+      if (docIdMatch && docIdMatch[1]) {
+        const docId = docIdMatch[1];
+        // Convert to direct PDF download URL
+        const downloadUrl = `https://docs.google.com/document/d/${docId}/export?format=pdf`;
+        logger.info(`Converted Google Docs URL to direct download: ${downloadUrl}`);
+        return downloadUrl;
+      }
+    } else if (url.includes('docs.google.com/spreadsheets')) {
+      // Handle Google Sheets
+      const docIdMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (docIdMatch && docIdMatch[1]) {
+        const docId = docIdMatch[1];
+        const downloadUrl = `https://docs.google.com/spreadsheets/d/${docId}/export?format=pdf`;
+        logger.info(`Converted Google Sheets URL to direct download: ${downloadUrl}`);
+        return downloadUrl;
+      }
+    } else if (url.includes('docs.google.com/presentation')) {
+      // Handle Google Slides
+      const docIdMatch = url.match(/\/presentation\/d\/([a-zA-Z0-9-_]+)/);
+      if (docIdMatch && docIdMatch[1]) {
+        const docId = docIdMatch[1];
+        const downloadUrl = `https://docs.google.com/presentation/d/${docId}/export/pdf`;
+        logger.info(`Converted Google Slides URL to direct download: ${downloadUrl}`);
+        return downloadUrl;
+      }
+    } else if (url.includes('drive.google.com/file')) {
+      // Handle Google Drive file URLs
+      const fileIdMatch = url.match(/\/file\/d\/([a-zA-Z0-9-_]+)/);
+      if (fileIdMatch && fileIdMatch[1]) {
+        const fileId = fileIdMatch[1];
+        const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+        logger.info(`Converted Google Drive URL to direct download: ${downloadUrl}`);
+        return downloadUrl;
+      }
+    }
+    
+    // Return original URL if not a Google URL or couldn't extract ID
+    return url;
+  } catch (error) {
+    logger.warn(`Error converting Google Docs URL: ${error.message}, using original URL`);
+    return url;
+  }
+};
+
+/**
  * Downloads a document from a URL and saves it to the uploads directory
  * @param {string} url - The URL of the document to download
  * @param {string} [filename] - Optional custom filename
@@ -18,7 +73,12 @@ const downloadDocumentFromUrl = async (url, filename = null, retryCount = 0, cus
   const MAX_RETRIES = 3;
   
   try {
-    logger.info(`Downloading document from URL: ${url}${retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : ''}`);
+    // Convert Google Docs URLs to direct download URLs
+    const downloadUrl = convertGoogleDocsUrl(url);
+    logger.info(`Downloading document from URL: ${downloadUrl}${retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : ''}`);
+    if (downloadUrl !== url) {
+      logger.info(`Original URL: ${url}`);
+    }
 
     // Combine default headers with custom headers
     const headers = {
@@ -32,7 +92,7 @@ const downloadDocumentFromUrl = async (url, filename = null, retryCount = 0, cus
     // Make the request to download the file with a timeout
     const response = await axios({
       method: 'GET',
-      url: url,
+      url: downloadUrl, // Use converted URL
       responseType: 'stream',
       timeout: 60000, // Increased to 60 seconds timeout
       maxContentLength: 25 * 1024 * 1024, // Increased to 25MB max size
@@ -54,6 +114,17 @@ const downloadDocumentFromUrl = async (url, filename = null, retryCount = 0, cus
     const contentType = response.headers['content-type'];
     const contentDisposition = response.headers['content-disposition'];
     
+    // Validate content type - reject HTML responses which indicate the URL didn't work
+    if (contentType && contentType.includes('text/html')) {
+      throw new Error(`Invalid content type: ${contentType}. The URL appears to return HTML instead of a document. For Google Docs, ensure the document is publicly accessible.`);
+    }
+    
+    // Log content type for debugging
+    logger.info(`Content-Type: ${contentType || 'not specified'}`);
+    if (contentDisposition) {
+      logger.info(`Content-Disposition: ${contentDisposition}`);
+    }
+    
     // Extract original filename if available in content-disposition header
     let originalFilename = null;
     if (contentDisposition) {
@@ -65,7 +136,12 @@ const downloadDocumentFromUrl = async (url, filename = null, retryCount = 0, cus
 
     // Generate a new filename if none provided or found
     if (!filename && !originalFilename) {
-      const extension = determineExtension(contentType, null);
+      // For Google Docs PDF exports, force PDF extension
+      let extension = determineExtension(contentType, null);
+      if (downloadUrl.includes('docs.google.com') && downloadUrl.includes('export?format=pdf')) {
+        extension = '.pdf';
+        logger.info('Google Docs PDF export detected, forcing .pdf extension');
+      }
       const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
       filename = `url-document-${uniqueSuffix}${extension}`;
     } else if (!filename) {

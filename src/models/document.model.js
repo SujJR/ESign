@@ -30,7 +30,7 @@ const documentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['uploaded', 'processing', 'ready_for_signature', 'sent_for_signature', 'partially_signed', 'completed', 'cancelled', 'expired', 'failed', 'signature_error'],
+      enum: ['uploaded', 'processing', 'ready_for_signature', 'sent_for_signature', 'out_for_signature', 'partially_signed', 'completed', 'cancelled', 'expired', 'failed', 'signature_error'],
       default: 'uploaded'
     },
     adobeAgreementId: {

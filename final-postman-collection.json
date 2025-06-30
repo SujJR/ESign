@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "E-Signature API - Complete Collection with Enhanced Workflow",
-    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, iframe-compatible signing URLs, and webhook integration.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🆕 NEW FEATURES:\n• Send reminders to unsigned recipients\n• Get signing URLs for iframe embedding\n• Get signing URLs for all recipients at once\n• Auto-extract recipients from JSON template data\n• Map signature fields to specific users\n• Enhanced workflow management\n• Real-time status updates via webhooks\n• Manual signature status synchronization\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM NOTICE:\nAdobe Sign's API reminder endpoints currently return 404 errors. For reliable reminders, use Adobe Sign's web interface:\n1. Go to: https://echosign.adobe.com/\n2. Click \"Manage\" → Find document → \"Send Reminder\"\n3. Adobe automatically emails unsigned recipients\n\nThe reminder API endpoint still works for identifying unsigned recipients and system integration.\n\n🔔 WEBHOOK INTEGRATION:\nThis API now supports Adobe Sign webhooks for real-time status updates. Set up webhooks to automatically update signature status and timestamps when documents are signed.",
+    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, iframe-compatible signing URLs, and webhook integration.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🚀 UNIFIED ENDPOINT: All document upload, preparation, and sending operations are now combined into ONE powerful endpoint:\n• `/api/documents/upload-and-send` - Supports 3 upload methods in one interface\n• Method 1: File Upload + JSON File (multipart/form-data)\n• Method 2: Document URL + JSON Files (multipart/form-data)\n• Method 3: Document URL + Inline JSON (application/json)\n\n🆕 KEY FEATURES:\n• Single endpoint for complete document workflow\n• Auto-extract recipients from JSON template data\n• Process template variables in DOCX files\n• Real-time Adobe Sign integration\n• Generate and store signing URLs\n• Enhanced error handling and logging\n• Rate limit protection\n• Webhook support for status updates\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM:\nThe API includes reminder functionality for unsigned recipients. Adobe Sign's native reminder API may have limitations, but the system provides both Adobe Sign API reminders and email reminders for reliability.\n\n🔔 WEBHOOK INTEGRATION:\nSupports Adobe Sign webhooks for real-time status updates. Webhooks automatically update signature status and timestamps when documents are signed.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -143,153 +143,90 @@
       "name": "Document Management",
       "item": [
         {
-          "name": "Upload DOCX with Template Data (JSON File)",
-          "event": [
+          "name": "Upload, Prepare, and Send Document (Unified Endpoint)",
+          "item": [
             {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 201) {",
-                  "    const response = pm.response.json();",
-                  "    if (response.data && response.data.document) {",
-                  "        pm.collectionVariables.set('documentId', response.data.document._id);",
-                  "        console.log('Template processed successfully, ID saved:', response.data.document._id);",
-                  "    }",
-                  "}"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "Current authentication method - API Key"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{authToken}}",
-                "description": "Legacy authentication method - JWT token",
-                "disabled": true
-              }
-            ],
-            "body": {
-              "mode": "formdata",
-              "formdata": [
+              "name": "Method 1: File Upload + JSON File",
+              "event": [
                 {
-                  "key": "document",
-                  "type": "file",
-                  "src": [],
-                  "description": "Upload your DOCX template file (e.g., Test_Service_Agreement_Template.docx)"
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    const response = pm.response.json();",
+                      "    if (response.data && response.data.document) {",
+                      "        pm.collectionVariables.set('documentId', response.data.document._id);",
+                      "        console.log('✅ Method 1: File upload completed successfully');",
+                      "        console.log('📄 Document ID:', response.data.document._id);",
+                      "        console.log('📊 Adobe Sign Method:', response.data.method);",
+                      "        console.log('🔗 Upload Method:', response.data.uploadMethod);",
+                      "        console.log('📋 Template Variables Processed:', response.data.templateVariablesProcessed);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "X-API-Key", "value": "{{apiKey}}", "description": "API Key for authentication" }
+                ],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    { "key": "document", "type": "file", "src": [], "description": "📄 Upload your DOCX, PDF, or DOC file" },
+                    { "key": "data", "type": "file", "src": [], "description": "📄 Upload JSON file with template data and recipient info" },
+                    { "key": "signingFlow", "value": "SEQUENTIAL", "type": "text", "description": "📋 Optional: SEQUENTIAL or PARALLEL signing flow" }
+                  ]
                 },
-                {
-                  "key": "data",
-                  "type": "file",
-                  "src": [],
-                  "description": "Upload JSON file with template data and recipient info (e.g., test-template-data.json)"
-                }
-              ]
+                "url": "{{baseUrl}}/api/documents/upload-and-send",
+                "description": "**Method 1: File Upload + JSON Data File**\n\nUpload document files directly from your computer.\n\n📄 **How to use:**\n1. Upload your document file (PDF, DOCX, DOC)\n2. Upload a JSON file containing template data and recipients\n3. Click Send\n\n✅ **Perfect for:** Traditional file upload workflows"
+              }
             },
-            "url": "{{baseUrl}}/api/documents/upload-with-data"
-          }
-        },
-        {
-          "name": "Upload Document from URL with JSON Data",
-          "event": [
             {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 201) {",
-                  "    const response = pm.response.json();",
-                  "    if (response.data && response.data.document) {",
-                  "        pm.collectionVariables.set('documentId', response.data.document.id);",
-                  "        console.log('Document uploaded from URL successfully, ID saved:', response.data.document.id);",
-                  "    }",
-                  "}"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "Current authentication method - API Key"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "formdata",
-              "formdata": [
+              "name": "Method 2: Document URL + Inline JSON",
+              "event": [
                 {
-                  "key": "documentUrl",
-                  "value": "https://example.com/path/to/document.docx",
-                  "type": "text",
-                  "description": "URL to the document to download"
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    const response = pm.response.json();",
+                      "    if (response.data && response.data.document) {",
+                      "        pm.collectionVariables.set('documentId', response.data.document._id);",
+                      "        console.log('✅ Method 3: URL + inline JSON completed successfully');",
+                      "        console.log('📄 Document ID:', response.data.document._id);",
+                      "        console.log('📊 Adobe Sign Method:', response.data.method);",
+                      "        console.log('🔗 Upload Method:', response.data.uploadMethod);",
+                      "        console.log('📋 Template Variables Processed:', response.data.templateVariablesProcessed);",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "X-API-Key", "value": "{{apiKey}}", "description": "API Key for authentication" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"documentUrl\": \"https://docs.google.com/document/d/1oC0q7y8_FbJmckQiU73lun4W5k1E4qmz/edit?usp=sharing&ouid=117769269345574843932&rtpof=true&sd=true\",\n  \"jsonData\": {\n    \"agreementDate\": \"June 12, 2025\",\n    \"agreementId\": \"AGR-2025-0612\",\n    \"clientName\": \"Acme Corporation\",\n    \"clientAddress\": \"123 Client Street, Business City, BC 12345\",\n    \"clientEmail\": \"contact@acmecorp.com\",\n    \"clientPhone\": \"(555) 123-4567\",\n    \"clientTitle\": \"Chief Executive Officer\",\n    \"companyName\": \"Professional Services LLC\",\n    \"companyAddress\": \"456 Provider Avenue, Service City, SC 54321\",\n    \"companyEmail\": \"info@proservices.com\",\n    \"companyPhone\": \"(555) 987-6543\",\n    \"providerName\": \"Jane Provider\",\n    \"providerTitle\": \"Managing Director\",\n    \"service1\": \"Strategic consulting for business development\",\n    \"service2\": \"Market analysis and competitive positioning\",\n    \"service3\": \"Implementation support and project management\",\n    \"startDate\": \"June 15, 2025\",\n    \"endDate\": \"December 15, 2025\",\n    \"totalFee\": \"15,000\",\n    \"paymentSchedule\": \"50% upfront, 25% at midpoint, 25% upon completion\",\n    \"paymentDue\": \"15\",\n    \"lateFeePercentage\": \"1.5\",\n    \"terminationNotice\": \"30\",\n    \"witnessName\": \"Sam Witness\",\n    \"recipients\": [\n      {\n        \"name\": \"Acme Corporation\",\n        \"email\": \"{{recipientEmail}}\",\n        \"title\": \"Client\"\n      },\n      {\n        \"name\": \"Jane Provider\",\n        \"email\": \"jane.provider@example.com\",\n        \"title\": \"Service Provider\"\n      },\n      {\n        \"name\": \"Sam Witness\",\n        \"email\": \"sam.witness@example.com\",\n        \"title\": \"Witness\"\n      }\n    ]\n  },\n  \"signingFlow\": \"SEQUENTIAL\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
                 },
-                {
-                  "key": "jsonData",
-                  "type": "file",
-                  "src": [],
-                  "description": "Upload one or more JSON files with template data (will be combined)"
-                }
-              ]
-            },
-            "url": "{{baseUrl}}/api/documents/upload-from-url",
-            "description": "Upload a document from a URL and process it with JSON data. You can provide multiple JSON files that will be automatically combined.\n\n⚠️ TROUBLESHOOTING:\n- If you see 'socket hang up' errors, it means the connection to the remote server was terminated unexpectedly.\n- Try a different URL, check server accessibility, or use a direct upload instead.\n- Only HTTP and HTTPS URLs are supported.\n- Timeouts are set at 30 seconds for connection and 60 seconds for download.\n- Large files may cause timeouts - consider using direct upload for files over 10MB."
-          }
-        },
-        {
-          "name": "Upload Document from URL with inline JSON",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 201) {",
-                  "    const response = pm.response.json();",
-                  "    if (response.data && response.data.document) {",
-                  "        pm.collectionVariables.set('documentId', response.data.document.id);",
-                  "        console.log('Document uploaded from URL with inline JSON successfully, ID saved:', response.data.document.id);",
-                  "    }",
-                  "}"
-                ]
+                "url": "{{baseUrl}}/api/documents/upload-and-send",
+                "description": "**Method 3: Document URL + Inline JSON**\n\nDownload document from URL and provide JSON data inline.\n\n💾 **How to use:**\n1. Set Content-Type to application/json\n2. Provide documentUrl and jsonData in the request body\n3. Include recipients and template data in jsonData\n4. Click Send\n\n✅ **Perfect for:** API integrations and programmatic usage"
               }
             }
           ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "Current authentication method - API Key"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"documentUrl\": \"https://www.adobe.com/content/dam/cc/en/pdf/AdobeDocument_SamplePDF.pdf\",\n  \"jsonData\": {\n    \"clientName\": \"ABC Corporation\",\n    \"clientEmail\": \"contact@abccorp.com\",\n    \"signerName\": \"John Smith\",\n    \"signerEmail\": \"{{recipientEmail}}\",\n    \"signerTitle\": \"CEO\",\n    \"projectName\": \"Website Redesign\",\n    \"startDate\": \"June 15, 2025\",\n    \"endDate\": \"December 15, 2025\",\n    \"contractValue\": \"$50,000\",\n    \"recipients\": [\n      {\n        \"name\": \"John Smith\",\n        \"email\": \"{{recipientEmail}}\",\n        \"title\": \"CEO\",\n        \"signatureField\": \"signature_signer\"\n      },\n      {\n        \"name\": \"Jane Doe\",\n        \"email\": \"jane.doe@example.com\",\n        \"title\": \"CFO\",\n        \"signatureField\": \"signature_witness\"\n      }\n    ]\n  }\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": "{{baseUrl}}/api/documents/upload-from-url",
-            "description": "Upload a document from a URL and provide JSON template data directly in the request body instead of as files.\n\n⚠️ IMPORTANT NOTES:\n- Use a reliable and accessible URL - check that you can access it in your browser first.\n- Supported formats: PDF, DOCX, DOC (Word docs will be converted to PDF)\n- Some networks block downloads from external URLs - ensure your server has internet access.\n- Add custom timeout handling in your application to handle slow downloads.\n- For production, consider adding a retry mechanism for transient network errors."
-          }
+          "description": "# 🚀 UNIFIED ENDPOINT - All Three Upload Methods\n\nThis single endpoint `/api/documents/upload-and-send` supports **all three upload methods** in one unified interface. All methods perform the same operations:\n\n1. **Upload/Download** the document\n2. **Process** template variables\n3. **Prepare** for signature\n4. **Send** to Adobe Sign\n5. **Store** signing URLs\n\n**Choose the method that best fits your workflow:**\n\n## 📄 **Method 1: File Upload + JSON File**\n- Traditional file upload from computer\n- Perfect for manual workflows\n- Uses multipart/form-data\n\n## 🌐 **Method 2: Document URL + JSON Files**\n- Download document from URL\n- Upload multiple JSON files (auto-combined)\n- Great for distributed data sources\n\n## 💾 **Method 3: Document URL + Inline JSON**\n- Download document from URL\n- Provide JSON data in request body\n- Perfect for API integrations\n\n**All methods produce the same response format and perform the complete workflow in one call!**"
         },
         {
           "name": "Get All Documents",
@@ -325,42 +262,6 @@
       "name": "Signature Workflow",
       "item": [
         {
-          "name": "Prepare Document for Signature",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "API Key for authentication"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"recipients\": [\n    {\n      \"name\": \"John Smith\",\n      \"email\": \"john.smith@example.com\"\n    }\n  ]\n}"
-            },
-            "url": "{{baseUrl}}/api/documents/{{documentId}}/prepare"
-          }
-        },
-        {
-          "name": "Send for Signature",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "API Key for authentication"
-              }
-            ],
-            "url": "{{baseUrl}}/api/documents/{{documentId}}/send"
-          }
-        },
-        {
           "name": "Check Status",
           "request": {
             "method": "GET",
@@ -372,22 +273,6 @@
               }
             ],
             "url": "{{baseUrl}}/api/documents/{{documentId}}/status"
-          },
-          "response": []
-        },
-        {
-          "name": "Update Signature Status",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "API Key for authentication"
-              }
-            ],
-            "url": "{{baseUrl}}/api/documents/{{documentId}}/update-status",
-            "description": "🔄 **Force Update**: Manually check and update the signature status of a document by querying Adobe Sign API.\n\n✅ **Key Features**:\n• Retrieves the latest status from Adobe Sign\n• Updates document status (completed, cancelled, expired, etc.)\n• Updates each recipient's status (signed, pending, declined, etc.)\n• Updates signedAt timestamps for recipients who have signed\n\n⏱️ **When to use**:\n• As a fallback if webhooks fail\n• To manually sync status after network issues\n• When troubleshooting signature workflow problems\n\n📋 **Response includes**:\n• Updated document status\n• Updated recipient statuses\n• Signature timestamps"
           },
           "response": []
         },
@@ -406,7 +291,7 @@
           }
         },
         {
-          "name": "🆕 Send Reminder to Unsigned Recipients",
+          "name": "Send Reminder to Unsigned Recipients",
           "event": [
             {
               "listen": "test",
@@ -465,7 +350,7 @@
           }
         },
         {
-          "name": "📧 Get Adobe Sign Manual Reminder Instructions",
+          "name": "Update Recipient Timestamps",
           "event": [
             {
               "listen": "test",
@@ -473,185 +358,26 @@
                 "exec": [
                   "if (pm.response.code === 200) {",
                   "    const response = pm.response.json();",
-                  "    if (response.data && response.data.document) {",
-                  "        const doc = response.data.document;",
-                  "        console.log('📋 MANUAL REMINDER INSTRUCTIONS');",
-                  "        console.log('=' + '='.repeat(40));",
-                  "        console.log('');",
-                  "        console.log('Document:', doc.originalName);",
-                  "        console.log('Status:', doc.status);",
-                  "        console.log('Adobe Agreement ID:', doc.adobeAgreementId);",
-                  "        console.log('');",
-                  "        ",
-                  "        if (doc.recipients && doc.recipients.length > 0) {",
-                  "            const unsigned = doc.recipients.filter(r => !r.signedAt);",
-                  "            console.log('📧 Unsigned Recipients (' + unsigned.length + '):');",
-                  "            unsigned.forEach((recipient, i) => {",
-                  "                console.log('  ' + (i + 1) + '. ' + recipient.email);",
-                  "            });",
-                  "            console.log('');",
-                  "        }",
-                  "        ",
-                  "        console.log('🔗 SEND REMINDERS VIA ADOBE SIGN:');",
-                  "        console.log('1. Go to: https://echosign.adobe.com/');",
-                  "        console.log('2. Click \"Manage\" tab');",
-                  "        console.log('3. Find this agreement:');",
-                  "        console.log('   \"' + doc.originalName + '\"');",
-                  "        console.log('   ID: ' + doc.adobeAgreementId);",
-                  "        console.log('4. Click \"Send Reminder\"');",
-                  "        console.log('5. Adobe will email all unsigned recipients');",
-                  "        console.log('');",
-                  "        console.log('🌐 Direct Link (if available):');",
-                  "        console.log('https://echosign.adobe.com/agreements/' + doc.adobeAgreementId);",
-                  "    }",
-                  "} else {",
-                  "    console.log('❌ Failed to get reminder instructions:', pm.response.json().message);",
-                  "}"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "API Key for authentication"
-              }
-            ],
-            "url": "{{baseUrl}}/api/documents/{{documentId}}",
-            "description": "📧 **Get Manual Reminder Instructions**\n\nThis endpoint helps you get the information needed to send reminders manually via Adobe Sign's web interface.\n\n✅ **What you'll get:**\n• Document details (name, status, Adobe Agreement ID)\n• List of unsigned recipients\n• Step-by-step instructions for Adobe Sign web interface\n• Direct Adobe Sign URL (if available)\n\n🎯 **Perfect for:**\n• Getting Adobe Agreement IDs for manual reminder sending\n• Identifying which recipients still need to sign\n• Quick access to Adobe Sign direct links\n\n💡 **Pro tip:** Bookmark the Adobe Sign URL pattern:\n`https://echosign.adobe.com/agreements/{agreementId}`"
-          }
-        },
-        {
-          "name": "🆕 Get Signing URL for iframe Embedding",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "    const response = pm.response.json();",
-                  "    if (response.data && response.data.signingUrl) {",
-                  "        console.log('Signing URL retrieved successfully');",
-                  "        console.log('URL preview:', response.data.signingUrl.substring(0, 80) + '...');",
-                  "        console.log('Can embed in iframe:', response.data.embedding.canEmbed);",
-                  "        console.log('URL changes after signing:', response.data.urlBehavior.changesAfterSigning);",
-                  "        console.log('Agreement status:', response.data.agreement.status);",
-                  "        console.log('Recipient status:', response.data.recipient.status);",
-                  "        ",
-                  "        // Save the signing URL to collection variable for further use",
-                  "        pm.collectionVariables.set('signingUrl', response.data.signingUrl);",
-                  "    }",
-                  "} else {",
-                  "    console.log('Failed to get signing URL:', pm.response.json().message);",
-                  "}"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "API Key for authentication"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/documents/{{documentId}}/signing-url?recipientEmail=john.smith@example.com",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "documents", "{{documentId}}", "signing-url"],
-              "query": [
-                {
-                  "key": "recipientEmail",
-                  "value": "john.smith@example.com",
-                  "description": "Email of the recipient whose signing URL you want to retrieve. Must match one of the document recipients."
-                }
-              ]
-            },
-            "description": "Get the signing URL for a specific recipient. This URL can be embedded in an iframe for seamless user experience.\n\n⚠️ Important: URLs may change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding."
-          }
-        },
-        {
-          "name": "🆕 Get All Signing URLs",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "    const response = pm.response.json();",
-                  "    if (response.data && response.data.recipients) {",
-                  "        console.log('All signing URLs retrieved successfully');",
-                  "        console.log('Total recipients:', response.data.totalRecipients);",
-                  "        console.log('Active URLs:', response.data.activeUrls);",
-                  "        console.log('Agreement status:', response.data.agreement.status);",
-                  "        ",
-                  "        response.data.recipients.forEach((recipient, index) => {",
-                  "            console.log(`${index + 1}. ${recipient.recipient.name} (${recipient.recipient.email})`);",
-                  "            console.log(`   Status: ${recipient.status}`);",
-                  "            console.log(`   Can Sign: ${recipient.canSign}`);",
-                  "            console.log(`   Signature Field: ${recipient.recipient.signatureField}`);",
-                  "            if (recipient.signingUrl) {",
-                  "                console.log(`   URL Preview: ${recipient.signingUrl.substring(0, 60)}...`);",
+                  "    if (response.data && response.data.updatesApplied) {",
+                  "        console.log('✅ Timestamp update successful - applied', response.data.updatesApplied, 'updates');",
+                  "        response.data.results.forEach(result => {",
+                  "            if (result.success) {",
+                  "                console.log('✅ ' + result.email + ': ' + result.changes);",
+                  "            } else {",
+                  "                console.log('❌ ' + result.email + ': ' + result.error);",
                   "            }",
-                  "            console.log('');",
-                  "        });",
-                  "    }",
-                  "} else {",
-                  "    console.log('Failed to get signing URLs:', pm.response.json().message);",
-                  "}"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "API Key for authentication"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/documents/{{documentId}}/signing-urls",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "documents", "{{documentId}}", "signing-urls"]
-            },
-            "description": "Get signing URLs for all recipients of a document. This endpoint returns an array of all recipients with their respective signing URLs, status, and signature field mappings.\n\n⚠️ Important: URLs may change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding."
-          }
-        },
-        {
-          "name": "🆕 Prepare Document with JSON Recipients (Auto-Mapping)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "    const response = pm.response.json();",
-                  "    console.log('Document prepared with auto-extracted JSON recipients successfully');",
-                  "    if (response.data && response.data.document && response.data.document.recipients) {",
-                  "        console.log('Recipients auto-extracted from JSON template data:');",
-                  "        response.data.document.recipients.forEach((recipient, index) => {",
-                  "            console.log(`${index + 1}. ${recipient.name} (${recipient.email})`);",
-                  "            console.log(`   Signature Field: ${recipient.signatureField}`);",
-                  "            console.log(`   Title: ${recipient.title || 'N/A'}`);",
                   "        });",
                   "        console.log('');",
-                  "        console.log('Auto-generated signature field mapping:');",
-                  "        if (response.data.document.signatureFieldMapping) {",
-                  "            Object.entries(response.data.document.signatureFieldMapping).forEach(([email, field]) => {",
-                  "                console.log(`   ${email} → ${field}`);",
-                  "            });",
-                  "        }",
+                  "        console.log('📅 Updated recipients:');",
+                  "        response.data.currentRecipients.forEach((recipient, index) => {",
+                  "            console.log(`${index + 1}. ${recipient.email}`);",
+                  "            console.log(`   Status: ${recipient.status}`);",
+                  "            console.log(`   SignedAt: ${recipient.signedAt || 'null'}`);",
+                  "            console.log(`   LastAccessed: ${recipient.lastSigningUrlAccessed || 'null'}`);",
+                  "        });",
                   "    }",
                   "} else {",
-                  "    console.log('Failed to prepare document:', pm.response.json().message);",
+                  "    console.log('❌ Timestamp update failed:', pm.response.json().message);",
                   "}"
                 ]
               }
@@ -672,19 +398,15 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"useIntelligentPositioning\": true\n}",
+              "raw": "{\n  \"recipientUpdates\": [\n    {\n      \"email\": \"{{recipientEmail}}\",\n      \"status\": \"signed\",\n      \"signedAt\": \"2024-01-15T14:30:00.000Z\",\n      \"lastSigningUrlAccessed\": \"2024-01-15T14:25:00.000Z\"\n    },\n    {\n      \"email\": \"jane.provider@example.com\",\n      \"status\": \"viewed\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/documents/{{documentId}}/prepare",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "documents", "{{documentId}}", "prepare"]
-            },
-            "description": "🚀 **Enhanced Auto-Extraction**: Automatically extracts recipients from uploaded JSON template data and generates signature field mapping dynamically.\n\n✨ **New Dynamic Features**:\n• Auto-extracts recipients from JSON `recipients` array\n• Auto-generates signature field mapping from recipient emails and signatureField properties\n• Only includes people intended for signatures (ignores project managers, approvers, etc.)\n• No manual mapping required!\n\n📋 **How it works**:\n1. Reads the `recipients` array from your uploaded JSON template data\n2. Extracts only the people meant to sign (not project managers, etc.)\n3. Automatically creates signature field mapping using their emails and signatureField values\n4. Prepares document for signature with intelligent positioning\n\n🎯 **Expected JSON structure**:\n```json\n{\n  \"recipients\": [\n    {\n      \"name\": \"John Smith\",\n      \"email\": \"john.smith@example.com\",\n      \"title\": \"CEO\",\n      \"signatureField\": \"clientSignature\"\n    }\n  ]\n}\n```\n\n⚡ **No manual work needed** - just upload your JSON with recipients and call this endpoint!"
+            "url": "{{baseUrl}}/api/documents/{{documentId}}/update-timestamps",
+            "description": "🕒 **Manually Update Recipient Timestamps**\n\n✅ **What this endpoint does:**\n• Updates signedAt and lastSigningUrlAccessed timestamps for recipients\n• Changes recipient status (pending → viewed → signed)\n• Auto-sets timestamps when status changes (if not provided)\n• Updates overall document status based on recipient changes\n• Provides detailed response showing what was changed\n\n🎯 **When to use this endpoint:**\n• Adobe Sign status sync is not working (integration not configured)\n• Webhook events are not being received\n• Need to manually correct timestamp data\n• Bulk updating recipient statuses and timestamps\n\n📋 **Request Format:**\n• `recipientUpdates`: Array of recipient updates\n• `email`: Recipient email (required)\n• `status`: New status (optional: pending, sent, viewed, signed, declined)\n• `signedAt`: Timestamp when signed (ISO format, optional)\n• `lastSigningUrlAccessed`: Timestamp when accessed (ISO format, optional)\n\n💡 **Auto-timestamp features:**\n• Setting status to 'signed' auto-sets signedAt if not provided\n• Setting status to 'viewed' or 'signed' auto-sets lastSigningUrlAccessed if not provided\n• Timestamps are validated for proper ISO format\n\n🔧 **Response includes:**\n• Number of updates applied\n• Detailed results for each recipient\n• Current state of all recipients after update\n• Error messages for invalid updates\n\n⚠️ **Important:** This endpoint bypasses Adobe Sign and updates the database directly. Use when Adobe Sign integration is not available or when you need to correct data manually."
           }
         }
       ]
