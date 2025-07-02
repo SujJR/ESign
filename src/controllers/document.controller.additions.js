@@ -1,3 +1,9 @@
+const Document = require('../models/document.model');
+const Log = require('../models/log.model');
+const { ApiError } = require('../utils/apiUtils');
+const logger = require('../utils/logger');
+const { getAccessToken, getAgreementInfo } = require('../config/adobeSign');
+
 /**
  * Check and update the signature status of a document
  * @route POST /api/documents/:id/update-status

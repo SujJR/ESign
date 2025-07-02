@@ -151,21 +151,120 @@ exports.checkDocumentStatus = async (req, res, next) => {
           }
         }
         
-        // Update recipient statuses
-        if (agreementInfo.participantSets) {
-          agreementInfo.participantSets.forEach(participantSet => {
-            participantSet.memberInfos.forEach(member => {
-              const recipient = document.recipients.find(r => 
-                r.email.toLowerCase() === member.email.toLowerCase()
-              );
-              if (recipient) {
-                recipient.status = member.status?.toLowerCase() || 'pending';
-                if (member.completedDate) {
-                  recipient.signedAt = new Date(member.completedDate);
+        // Update recipient statuses with proper Adobe Sign status mapping
+        const participantSets = agreementInfo.participantSets || 
+                               (agreementInfo.participants && agreementInfo.participants.participantSets) ||
+                               [];
+        
+        if (participantSets.length > 0) {
+          let statusesUpdated = false;
+          
+          participantSets.forEach(participantSet => {
+            if (participantSet.memberInfos) {
+              participantSet.memberInfos.forEach(member => {
+                const recipient = document.recipients.find(r => 
+                  r.email.toLowerCase() === member.email.toLowerCase()
+                );
+                if (recipient) {
+                  const oldStatus = recipient.status;
+                  let newStatus = 'sent'; // Default
+                  
+                  // Map Adobe Sign statuses to our internal statuses
+                  switch (member.status) {
+                    case 'SIGNED':
+                    case 'COMPLETED':
+                      newStatus = 'signed';
+                      // Set timestamps for signed recipients
+                      if (!recipient.signedAt) {
+                        recipient.signedAt = new Date(member.completedDate || Date.now());
+                      }
+                      if (!recipient.lastSigningUrlAccessed) {
+                        recipient.lastSigningUrlAccessed = new Date(member.completedDate || recipient.signedAt || Date.now());
+                      }
+                      break;
+                    case 'WAITING_FOR_OTHERS':
+                      newStatus = 'signed'; // They signed but waiting for others
+                      if (!recipient.signedAt) {
+                        recipient.signedAt = new Date(member.completedDate || Date.now());
+                      }
+                      break;
+                    case 'OUT_FOR_SIGNATURE':
+                    case 'ACTIVE':
+                    case 'WAITING_FOR_MY_SIGNATURE':
+                    case 'WAITING_FOR_MY_APPROVAL':
+                    case 'ACTION_REQUESTED':
+                    case 'WAITING_FOR_SIGNATURE':
+                    case 'WAITING_FOR_VERIFICATION':
+                    case 'WAITING_FOR_FAXING':
+                    case 'WAITING_FOR_COUNTER_SIGNATURE':
+                    case 'WAITING_FOR_MY_REVIEW':
+                    case 'WAITING_FOR_MY_ACKNOWLEDGEMENT':
+                    case 'DELEGATED':
+                      newStatus = 'sent';
+                      break;
+                    case 'DECLINED':
+                      newStatus = 'declined';
+                      break;
+                    case 'EXPIRED':
+                      newStatus = 'expired';
+                      break;
+                    case 'NOT_YET_VISIBLE':
+                    case 'WAITING_FOR_MY_PREREQUISITES':
+                    case 'WAITING_FOR_PREREQUISITE':
+                    case 'WAITING_FOR_AUTHORING':
+                    case 'AUTHORING':
+                      newStatus = 'waiting';
+                      break;
+                    case 'VIEWED':
+                    case 'EMAIL_VIEWED':
+                    case 'DOCUMENT_VIEWED':
+                      newStatus = 'viewed';
+                      break;
+                    case 'DELEGATION_PENDING':
+                    case 'CREATED':
+                    case 'DRAFT':
+                      newStatus = 'pending';
+                      break;
+                    default:
+                      // For unrecognized statuses, check overall agreement status
+                      if (agreementInfo.status === 'SIGNED' || agreementInfo.status === 'COMPLETED') {
+                        newStatus = 'signed';
+                      } else {
+                        newStatus = 'sent';
+                      }
+                  }
+                  
+                  // Update status if it has changed
+                  if (oldStatus !== newStatus) {
+                    recipient.status = newStatus;
+                    statusesUpdated = true;
+                    logger.info(`Updated status for ${recipient.email}: ${oldStatus} → ${newStatus} (Adobe: ${member.status})`);
+                  }
+                  
+                  // Update access timestamp if available
+                  if (member.lastViewedDate || member.accessDate) {
+                    const newAccessTime = new Date(member.accessDate || member.lastViewedDate);
+                    if (!recipient.lastSigningUrlAccessed || recipient.lastSigningUrlAccessed < newAccessTime) {
+                      recipient.lastSigningUrlAccessed = newAccessTime;
+                      statusesUpdated = true;
+                    }
+                  }
+                  
+                  // Update order from Adobe Sign participant set
+                  if (participantSet.order !== undefined && participantSet.order !== null) {
+                    if (recipient.order !== participantSet.order) {
+                      recipient.order = participantSet.order;
+                      statusesUpdated = true;
+                    }
+                  }
                 }
-              }
-            });
+              });
+            }
           });
+          
+          if (statusesUpdated) {
+            logger.info('✅ Successfully updated recipient statuses from Adobe Sign');
+          }
         }
         
         await document.save();
@@ -409,9 +508,58 @@ exports.sendReminder = async (req, res, next) => {
               r.email.toLowerCase() === member.email.toLowerCase()
             );
             if (recipient) {
-              recipient.status = member.status?.toLowerCase() || 'pending';
+              // Map Adobe Sign status to internal status
+              const adobeStatus = member.status;
+              let internalStatus = 'pending';
+              
+              switch (adobeStatus) {
+                case 'WAITING_FOR_MY_SIGNATURE':
+                case 'WAITING_FOR_AUTHORING':
+                case 'ACTIVE':
+                case 'OUT_FOR_SIGNATURE':
+                  internalStatus = 'sent';
+                  break;
+                case 'SIGNED':
+                case 'COMPLETED':
+                case 'APPROVED':
+                  internalStatus = 'signed';
+                  break;
+                case 'DELIVERED':
+                  internalStatus = 'delivered';
+                  break;
+                case 'DECLINED':
+                  internalStatus = 'declined';
+                  break;
+                case 'EXPIRED':
+                  internalStatus = 'expired';
+                  break;
+                case 'CANCELLED':
+                  internalStatus = 'cancelled';
+                  break;
+                default:
+                  internalStatus = 'pending';
+              }
+              
+              const oldStatus = recipient.status;
+              recipient.status = internalStatus;
+              
+              // Update timestamps if status changed or if we have new timing data
               if (member.completedDate) {
                 recipient.signedAt = new Date(member.completedDate);
+              }
+              
+              // Update last signing URL access time if available
+              if (member.lastSigningUrlAccessed) {
+                recipient.lastSigningUrlAccessed = new Date(member.lastSigningUrlAccessed);
+              }
+              
+              // Update recipient order if available
+              if (member.routingOrder !== undefined) {
+                recipient.order = member.routingOrder;
+              }
+              
+              if (oldStatus !== internalStatus) {
+                logger.info(`Recipient ${recipient.email} status updated: ${oldStatus} → ${internalStatus} (Adobe: ${adobeStatus})`);
               }
             }
           });
@@ -425,7 +573,7 @@ exports.sendReminder = async (req, res, next) => {
     
     // Find recipients who haven't signed yet
     const unsignedRecipients = document.recipients.filter(recipient => 
-      !['signed', 'completed', 'delivered'].includes(recipient.status?.toLowerCase())
+      !['signed', 'delivered'].includes(recipient.status?.toLowerCase())
     );
     
     if (unsignedRecipients.length === 0) {
@@ -555,7 +703,7 @@ exports.updateSignatureStatus = async (req, res, next) => {
     
     // Check if all recipients have signed
     const allSigned = document.recipients.every(r => 
-      ['signed', 'completed', 'delivered'].includes(r.status?.toLowerCase())
+      ['signed', 'delivered'].includes(r.status?.toLowerCase())
     );
     
     if (allSigned && document.status !== 'completed') {

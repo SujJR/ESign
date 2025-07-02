@@ -34,7 +34,8 @@ router.get('/:id/status', requirePermissions(['documents:read', 'admin:all']), d
 router.post('/:id/update-status', requirePermissions(['documents:write', 'admin:all']), documentController.updateSignatureStatus);
 
 // Manually update recipient timestamps (fallback when Adobe Sign sync fails)
-router.post('/:id/update-timestamps', requirePermissions(['documents:write', 'admin:all']), documentController.updateRecipientTimestamps);
+// TODO: Implement updateRecipientTimestamps function
+// router.post('/:id/update-timestamps', requirePermissions(['documents:write', 'admin:all']), documentController.updateRecipientTimestamps);
 
 // Recover document from socket hang up error
 router.post('/:id/recover', requirePermissions(['documents:write', 'admin:all']), documentControllerAdditions.recoverDocument);

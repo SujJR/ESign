@@ -408,4 +408,90 @@ router.get('/system/status', authenticateApiKey, async (req, res, next) => {
   }
 });
 
+/**
+ * Force refresh document status from Adobe Sign
+ * @route POST /api/documents/:id/force-refresh
+ */
+router.post('/:id/force-refresh', authenticateApiKey, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    logger.info(`🔄 Force refreshing status for document: ${id}`);
+    
+    const refreshedDocument = await reminderScheduler.forceStatusRefresh(id);
+    
+    if (!refreshedDocument) {
+      return res.status(404).json(formatResponse(
+        404,
+        'Document not found or could not refresh status'
+      ));
+    }
+    
+    // Also run verification
+    const verification = await reminderScheduler.verifyDocumentStatuses(id);
+    
+    res.status(200).json(formatResponse(
+      200,
+      'Document status refreshed successfully',
+      {
+        documentId: id,
+        refreshedAt: new Date().toISOString(),
+        document: {
+          status: refreshedDocument.status,
+          recipients: refreshedDocument.recipients.map(r => ({
+            email: r.email,
+            name: r.name,
+            status: r.status,
+            order: r.order,
+            signedAt: r.signedAt,
+            lastReminderSent: r.lastReminderSent,
+            lastSigningUrlAccessed: r.lastSigningUrlAccessed
+          }))
+        },
+        verification: verification
+      }
+    ));
+
+  } catch (error) {
+    logger.error(`❌ Error force refreshing document ${req.params.id}:`, error.message);
+    next(error);
+  }
+});
+
+/**
+ * Test reminder execution without scheduling
+ * @route POST /api/documents/:id/test-reminder
+ */
+router.post('/:id/test-reminder', authenticateApiKey, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { message = 'Test reminder' } = req.body;
+    
+    logger.info(`🧪 Testing reminder execution for document: ${id}`);
+    
+    // Create a mock reminder
+    const mockReminder = {
+      documentId: id,
+      type: 'test',
+      message: message
+    };
+    
+    const result = await reminderScheduler.executeReminder(mockReminder);
+    
+    res.status(200).json(formatResponse(
+      200,
+      'Reminder test completed',
+      {
+        documentId: id,
+        testedAt: new Date().toISOString(),
+        result: result
+      }
+    ));
+
+  } catch (error) {
+    logger.error(`❌ Error testing reminder for document ${req.params.id}:`, error.message);
+    next(error);
+  }
+});
+
 module.exports = router;

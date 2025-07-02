@@ -74,6 +74,8 @@ const handleSigningComplete = async (eventData) => {
       return;
     }
     
+    logger.info(`🔔 Processing signing complete event for agreement: ${agreementId}`);
+    
     // Find document by Adobe agreement ID
     const document = await Document.findOne({ adobeAgreementId: agreementId });
     if (!document) {
@@ -81,9 +83,13 @@ const handleSigningComplete = async (eventData) => {
       return;
     }
     
+    logger.info(`Found document: ${document.originalName} (${document._id})`);
+    
     // Extract participant information
     const participantEmail = eventData.participant?.email;
     const participantName = eventData.participant?.name;
+    
+    logger.info(`Participant email: ${participantEmail}, name: ${participantName}`);
     
     if (participantEmail) {
       // Find the recipient in the document
@@ -92,39 +98,117 @@ const handleSigningComplete = async (eventData) => {
       );
       
       if (recipientIndex !== -1) {
-        // Update recipient status
-        const oldStatus = document.recipients[recipientIndex].status;
-        document.recipients[recipientIndex].status = 'signed';
+        const recipient = document.recipients[recipientIndex];
+        // Update recipient status to signed using enhanced mapping
+        const oldStatus = recipient.status;
+        recipient.status = 'signed';
         
-        // Always update signedAt timestamp when someone signs
-        if (!document.recipients[recipientIndex].signedAt) {
-          document.recipients[recipientIndex].signedAt = new Date();
-          logger.info(`Set signedAt timestamp for ${participantEmail} via webhook`);
+        // Enhanced timestamp handling - set both signedAt and lastSigningUrlAccessed
+        const signedTimestamp = new Date();
+        
+        // Set signedAt timestamp with enhanced date handling
+        if (!recipient.signedAt) {
+          // Check if the webhook provides more specific timing information
+          const possibleSigningDates = [
+            eventData.agreement?.completedDate,
+            eventData.agreement?.statusUpdateDate,
+            eventData.participant?.signedDate,
+            eventData.participant?.completedDate,
+            signedTimestamp
+          ].filter(date => date);
+          
+          if (possibleSigningDates.length > 0) {
+            // Use the most recent valid date
+            const latestDate = new Date(Math.max(...possibleSigningDates.map(d => new Date(d).getTime())));
+            recipient.signedAt = latestDate;
+            logger.info(`✅ Set signedAt timestamp for ${participantEmail} to ${recipient.signedAt.toISOString()}`);
+          } else {
+            recipient.signedAt = signedTimestamp;
+            logger.info(`✅ Set signedAt timestamp for ${participantEmail} to ${signedTimestamp.toISOString()}`);
+          }
+        } else {
+          logger.info(`signedAt already set for ${participantEmail}: ${recipient.signedAt.toISOString()}`);
         }
         
-        // Also update lastSigningUrlAccessed since they accessed the document to sign
-        document.recipients[recipientIndex].lastSigningUrlAccessed = new Date();
+        // Update lastSigningUrlAccessed timestamp - they accessed the document to sign
+        const possibleAccessDates = [
+          eventData.participant?.accessDate,
+          eventData.participant?.lastViewedDate,
+          eventData.participant?.viewDate,
+          signedTimestamp
+        ].filter(date => date);
         
-        logger.info(`Updated signing status for ${participantEmail}: ${oldStatus} → signed`);
-        logger.info(`Updated timestamps - signedAt: ${document.recipients[recipientIndex].signedAt}, lastAccessed: ${document.recipients[recipientIndex].lastSigningUrlAccessed}`);
+        if (possibleAccessDates.length > 0) {
+          const latestAccessDate = new Date(Math.max(...possibleAccessDates.map(d => new Date(d).getTime())));
+          recipient.lastSigningUrlAccessed = latestAccessDate;
+          logger.info(`✅ Updated lastSigningUrlAccessed for ${participantEmail} to ${recipient.lastSigningUrlAccessed.toISOString()}`);
+        } else {
+          recipient.lastSigningUrlAccessed = signedTimestamp;
+          logger.info(`✅ Set lastSigningUrlAccessed for ${participantEmail} to ${signedTimestamp.toISOString()}`);
+        }
+        
+        logger.info(`✅ Updated signing status for ${participantEmail}: ${oldStatus} → ${recipient.status}`);
+        logger.info(`✅ Updated timestamps - signedAt: ${recipient.signedAt?.toISOString()}, lastAccessed: ${recipient.lastSigningUrlAccessed?.toISOString()}`);
+        
+        // Update overall document status based on all recipient statuses
+        updateDocumentOverallStatus(document);
+        
+        // Force save immediately to ensure data persistence
+        await document.save();
+        logger.info(`✅ Saved document after updating ${participantEmail} status`);
+        
+        // Verify the save worked
+        const verifyDoc = await Document.findById(document._id);
+        const verifyRecipient = verifyDoc.recipients.find(r => 
+          r.email.toLowerCase() === participantEmail.toLowerCase()
+        );
+        
+        if (verifyRecipient && verifyRecipient.status === 'signed') {
+          logger.info(`✅ Verified: ${participantEmail} status successfully saved as 'signed'`);
+        } else {
+          logger.error(`❌ Verification failed: ${participantEmail} status not properly saved`);
+        }
+        
       } else {
-        logger.warn(`Recipient ${participantEmail} not found in document`);
+        logger.warn(`⚠️ Recipient ${participantEmail} not found in document recipients`);
+        
+        // Log all recipients for debugging
+        logger.info(`Document recipients:`);
+        document.recipients.forEach((r, i) => {
+          logger.info(`  ${i+1}. ${r.name} <${r.email}> (status: ${r.status})`);
+        });
       }
-    } else if (eventData.agreement?.status === 'SIGNED') {
-      // If it's a completed agreement event, update the document status
-      document.status = 'completed';
-      logger.info(`Document ${document._id} marked as completed`);
+    } else if (eventData.agreement?.status === 'SIGNED' || eventData.agreement?.status === 'COMPLETED') {
+      // If it's a completed agreement event without specific participant, mark document as completed
+      logger.info(`Agreement marked as ${eventData.agreement.status} - updating document status`);
+      
+      // Mark any remaining unsigned recipients as signed (edge case handling)
+      let updatedAny = false;
+      document.recipients.forEach(recipient => {
+        if (recipient.status !== 'signed' && recipient.status !== 'declined') {
+          logger.info(`Force-updating ${recipient.email} to signed status based on agreement completion`);
+          recipient.status = 'signed';
+          recipient.signedAt = recipient.signedAt || new Date();
+          updatedAny = true;
+        }
+      });
+      
+      if (updatedAny) {
+        await document.save();
+        logger.info(`✅ Force-updated remaining recipients and saved document`);
+      }
     }
     
     // Update overall document status based on recipients
     updateDocumentStatus(document);
     
-    // Save the document
+    // Save the document again to persist status changes
     await document.save();
     
-    logger.info(`Successfully processed signing complete event for agreement: ${agreementId}`);
+    logger.info(`✅ Successfully processed signing complete event for agreement: ${agreementId}`);
   } catch (error) {
-    logger.error(`Error handling signing complete event: ${error.message}`);
+    logger.error(`❌ Error handling signing complete event: ${error.message}`);
+    logger.error(error.stack);
   }
 };
 
@@ -141,6 +225,8 @@ const handleDocumentViewed = async (eventData) => {
       return;
     }
     
+    logger.info(`👁️ Processing document viewed event for agreement: ${agreementId}`);
+    
     // Find document by Adobe agreement ID
     const document = await Document.findOne({ adobeAgreementId: agreementId });
     if (!document) {
@@ -151,6 +237,8 @@ const handleDocumentViewed = async (eventData) => {
     // Extract participant information
     const participantEmail = eventData.participant?.email;
     
+    logger.info(`Participant email: ${participantEmail}`);
+    
     if (participantEmail) {
       // Find the recipient in the document
       const recipientIndex = document.recipients.findIndex(
@@ -158,24 +246,39 @@ const handleDocumentViewed = async (eventData) => {
       );
       
       if (recipientIndex !== -1) {
-        // Update recipient status to viewed if currently pending or sent
-        if (['pending', 'sent'].includes(document.recipients[recipientIndex].status)) {
-          document.recipients[recipientIndex].status = 'viewed';
-          document.recipients[recipientIndex].lastSigningUrlAccessed = new Date();
+        const recipient = document.recipients[recipientIndex];
+        const oldStatus = recipient.status;
+        
+        // Update recipient status to viewed if currently pending or sent (but not if already signed)
+        if (['pending', 'sent'].includes(recipient.status)) {
+          recipient.status = 'viewed';
+          recipient.lastSigningUrlAccessed = new Date();
           
-          logger.info(`Updated status for ${participantEmail} to viewed`);
+          logger.info(`✅ Updated status for ${participantEmail}: ${oldStatus} → ${recipient.status}`);
+          logger.info(`✅ Updated lastSigningUrlAccessed for ${participantEmail} to ${recipient.lastSigningUrlAccessed.toISOString()}`);
           
           // Save the document
           await document.save();
+          logger.info(`✅ Saved document after updating ${participantEmail} view status`);
+        } else {
+          logger.info(`ℹ️ No status update needed for ${participantEmail} (current status: ${recipient.status})`);
+          
+          // Still update lastSigningUrlAccessed even if status doesn't change
+          if (!recipient.lastSigningUrlAccessed) {
+            recipient.lastSigningUrlAccessed = new Date();
+            await document.save();
+            logger.info(`✅ Updated lastSigningUrlAccessed for ${participantEmail}`);
+          }
         }
       } else {
-        logger.warn(`Recipient ${participantEmail} not found in document`);
+        logger.warn(`⚠️ Recipient ${participantEmail} not found in document`);
       }
     }
     
-    logger.info(`Successfully processed document viewed event for agreement: ${agreementId}`);
+    logger.info(`✅ Successfully processed document viewed event for agreement: ${agreementId}`);
   } catch (error) {
-    logger.error(`Error handling document viewed event: ${error.message}`);
+    logger.error(`❌ Error handling document viewed event: ${error.message}`);
+    logger.error(error.stack);
   }
 };
 
@@ -214,8 +317,8 @@ const handleSigningDeclined = async (eventData) => {
         
         logger.info(`Updated status for ${participantEmail} to declined`);
         
-        // Update document status
-        document.status = 'cancelled';
+        // Update overall document status based on all recipient statuses
+        updateDocumentOverallStatus(document);
         
         // Save the document
         await document.save();
@@ -310,17 +413,79 @@ const updateDocumentStatus = (document) => {
   const totalRecipients = document.recipients.length;
   const signedCount = statusCounts.signed || 0;
   const declinedCount = statusCounts.declined || 0;
+  const expiredCount = statusCounts.expired || 0;
   
-  // Update document status
+  const oldStatus = document.status;
+  let newStatus = oldStatus;
+  
+  logger.info(`📊 Document status calculation: ${signedCount}/${totalRecipients} signed, ${declinedCount} declined, ${expiredCount} expired`);
+  
+  // Update document status based on recipient statuses
   if (declinedCount > 0) {
-    document.status = 'cancelled';
+    newStatus = 'cancelled';
+    logger.info(`Document cancelled due to ${declinedCount} declined recipient(s)`);
+  } else if (expiredCount > 0) {
+    newStatus = 'expired';
+    logger.info(`Document expired due to ${expiredCount} expired recipient(s)`);
   } else if (signedCount === totalRecipients) {
-    document.status = 'completed';
+    newStatus = 'completed';
+    logger.info(`Document completed - all ${totalRecipients} recipients have signed`);
   } else if (signedCount > 0 && signedCount < totalRecipients) {
-    document.status = 'partially_signed';
+    newStatus = 'partially_signed';
+    logger.info(`Document partially signed - ${signedCount}/${totalRecipients} recipients have signed`);
+  } else if (signedCount === 0) {
+    // No one has signed yet, keep it as out_for_signature or sent_for_signature
+    if (['uploaded', 'processing', 'ready_for_signature'].includes(oldStatus)) {
+      newStatus = 'sent_for_signature';
+    } else {
+      newStatus = 'out_for_signature';
+    }
+    logger.info(`Document waiting for signatures - 0/${totalRecipients} recipients have signed`);
   }
   
-  logger.info(`Updated document status to ${document.status}`);
+  if (oldStatus !== newStatus) {
+    document.status = newStatus;
+    logger.info(`📝 Updated document ${document._id} status: ${oldStatus} → ${newStatus}`);
+  } else {
+    logger.info(`📋 Document ${document._id} status unchanged: ${newStatus}`);
+  }
+  
+  return document.status;
+};
+
+/**
+ * Update document overall status based on recipient statuses
+ * @param {Object} document - The document to update
+ */
+const updateDocumentOverallStatus = (document) => {
+  try {
+    const recipients = document.recipients || [];
+    if (recipients.length === 0) return;
+    
+    const signedCount = recipients.filter(r => r.status === 'signed').length;
+    const declinedCount = recipients.filter(r => r.status === 'declined').length;
+    const expiredCount = recipients.filter(r => r.status === 'expired').length;
+    
+    // Determine overall document status
+    if (signedCount === recipients.length) {
+      document.status = 'completed';
+      logger.info(`✅ Document marked as completed - all ${recipients.length} recipients have signed`);
+    } else if (declinedCount > 0) {
+      document.status = 'cancelled';
+      logger.info(`❌ Document marked as cancelled - ${declinedCount} recipient(s) declined`);
+    } else if (expiredCount > 0) {
+      document.status = 'expired';
+      logger.info(`⏱️ Document marked as expired - ${expiredCount} recipient(s) expired`);
+    } else if (signedCount > 0) {
+      document.status = 'partially_signed';
+      logger.info(`🔄 Document marked as partially signed - ${signedCount}/${recipients.length} recipients have signed`);
+    } else {
+      document.status = 'sent_for_signature';
+      logger.info(`📤 Document status: sent for signature`);
+    }
+  } catch (error) {
+    logger.error(`❌ Error updating document overall status: ${error.message}`);
+  }
 };
 
 /**

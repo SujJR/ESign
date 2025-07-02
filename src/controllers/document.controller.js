@@ -261,6 +261,27 @@ exports.getDocument = async (req, res, next) => {
     if (!document) {
       return next(new ApiError(404, 'Document not found'));
     }
+
+    // Auto-sync status from Adobe Sign if document has been sent for signature
+    if (document.adobeAgreementId && ['sent_for_signature', 'out_for_signature', 'partially_signed'].includes(document.status)) {
+      try {
+        logger.info(`Auto-syncing status for document ${document._id} from Adobe Sign`);
+        await syncStatusFromAdobeSign(document);
+        
+        // Reload the document to get updated data
+        const updatedDocument = await Document.findById(req.params.id);
+        
+        res.json(formatResponse(
+          200,
+          'Document retrieved successfully with updated status',
+          { document: updatedDocument }
+        ));
+        return;
+      } catch (syncError) {
+        logger.warn(`Auto-sync failed for document ${document._id}: ${syncError.message}`);
+        // Continue with original document if sync fails
+      }
+    }
     
     res.json(formatResponse(
       200,
@@ -370,37 +391,43 @@ exports.checkDocumentStatus = async (req, res, next) => {
                     }
                   }
                   
-                  // Map Adobe Sign statuses to our enum values
-                  const statusMapping = {
-                    'ACTIVE': 'sent',
-                    'OUT_FOR_SIGNATURE': 'sent', 
-                    'WAITING_FOR_VERIFICATION': 'sent',
-                    'WAITING_FOR_FAXING': 'sent',
-                    'WAITING_FOR_MY_SIGNATURE': 'sent',
-                    'WAITING_FOR_COUNTER_SIGNATURE': 'sent',
-                    'WAITING_FOR_MY_REVIEW': 'sent',
-                    'WAITING_FOR_MY_ACKNOWLEDGEMENT': 'sent',
-                    'DELEGATED': 'sent',
-                    'COMPLETED': 'signed',
-                    'SIGNED': 'signed',
-                    'FORM_FILLED': 'signed',
-                    'APPROVED': 'signed',
-                    'ACKNOWLEDGED': 'signed',
-                    'ACCEPTED': 'signed',
-                    'DELIVERED': 'signed',
-                    'DECLINED': 'declined',
-                    'CANCELLED': 'declined',
-                    'REJECTED': 'declined',
-                    'EXPIRED': 'expired',
-                    'RECALLED': 'expired',
-                    'WAITING_FOR_AUTHORING': 'waiting',
-                    'WAITING_FOR_MY_APPROVAL': 'waiting',
-                    'AUTHORING': 'waiting',
-                    'NOT_YET_VISIBLE': 'pending'
-                  };
+                  // Map Adobe Sign statuses to our enum values with comprehensive mapping
+                  let newStatus = 'sent'; // Default
+                  const adobeStatus = member.status;
+                  const setStatus = participantSet.status;
                   
-                  const adobeStatus = member.status?.toUpperCase();
-                  const newStatus = statusMapping[adobeStatus] || member.status?.toLowerCase() || 'pending';
+                  // Handle combination of member and participant set statuses
+                  if (adobeStatus === 'ACTIVE' && setStatus === 'WAITING_FOR_OTHERS') {
+                    // This person has signed and is waiting for others
+                    newStatus = 'signed';
+                  } else if (adobeStatus === 'ACTIVE' && setStatus === 'NOT_YET_VISIBLE') {
+                    // This person is not yet visible in the signing flow
+                    newStatus = 'waiting';
+                  } else if (adobeStatus === 'ACTIVE' && setStatus === 'WAITING_FOR_MY_SIGNATURE') {
+                    // This person is the current signer
+                    newStatus = 'sent';
+                  } else if (['SIGNED', 'COMPLETED', 'APPROVED', 'ACCEPTED', 'FORM_FILLED', 'ACKNOWLEDGED', 'DELIVERED'].includes(adobeStatus)) {
+                    newStatus = 'signed';
+                  } else if (['DECLINED', 'REJECTED', 'RECALLED', 'CANCELLED', 'CANCELED'].includes(adobeStatus)) {
+                    newStatus = 'declined';
+                  } else if (['EXPIRED'].includes(adobeStatus)) {
+                    newStatus = 'expired';
+                  } else if (['NOT_YET_VISIBLE', 'WAITING_FOR_OTHERS', 'WAITING_FOR_MY_PREREQUISITES', 'WAITING_FOR_PREREQUISITE', 'WAITING_FOR_AUTHORING', 'AUTHORING'].includes(adobeStatus)) {
+                    newStatus = 'waiting';
+                  } else if (['WAITING_FOR_MY_SIGNATURE', 'WAITING_FOR_MY_APPROVAL', 'OUT_FOR_SIGNATURE', 'ACTION_REQUESTED', 'WAITING_FOR_SIGNATURE', 'ACTIVE', 'WAITING_FOR_VERIFICATION', 'WAITING_FOR_FAXING', 'WAITING_FOR_COUNTER_SIGNATURE', 'WAITING_FOR_MY_REVIEW', 'WAITING_FOR_MY_ACKNOWLEDGEMENT', 'DELEGATED'].includes(adobeStatus)) {
+                    newStatus = 'sent';
+                  } else if (['VIEWED', 'EMAIL_VIEWED', 'DOCUMENT_VIEWED'].includes(adobeStatus)) {
+                    newStatus = 'viewed';
+                  } else if (['DELEGATION_PENDING', 'CREATED', 'DRAFT'].includes(adobeStatus)) {
+                    newStatus = 'pending';
+                  } else {
+                    // For unrecognized statuses, check overall agreement status
+                    if (agreementInfo.status === 'SIGNED' || agreementInfo.status === 'COMPLETED') {
+                      newStatus = 'signed';
+                    } else {
+                      newStatus = 'sent';
+                    }
+                  }
                   
                   // Only update status if it has actually changed
                   if (oldStatus !== newStatus) {
@@ -411,23 +438,50 @@ exports.checkDocumentStatus = async (req, res, next) => {
                     logger.debug(`No status change for ${recipient.email}: remains ${recipient.status} (Adobe status: ${adobeStatus})`);
                   }
                   
-                  // Update signedAt timestamp when status becomes 'signed'
-                  if (recipient.status === 'signed' && member.completedDate && !recipient.signedAt) {
-                    recipient.signedAt = new Date(member.completedDate);
-                    logger.info(`Updated signedAt for ${recipient.email}: ${recipient.signedAt}`);
-                    changesMade = true;
-                  } else if (recipient.status === 'signed' && !member.completedDate && !recipient.signedAt) {
-                    // Fallback: use current timestamp if Adobe doesn't provide completedDate
-                    recipient.signedAt = new Date();
-                    logger.info(`Set signedAt to current time for ${recipient.email} (no completedDate from Adobe)`);
-                    changesMade = true;
+                  // Update signedAt timestamp with enhanced date handling
+                  if (newStatus === 'signed') {
+                    const possibleSigningDates = [
+                      member.completedDate,
+                      member.statusUpdateDate,
+                      member.signedDate,
+                      member.lastModified,
+                      member.dateCompleted,
+                      member.dateSigned
+                    ].filter(date => date);
+                    
+                    if (possibleSigningDates.length > 0) {
+                      const latestDate = new Date(Math.max(...possibleSigningDates.map(d => new Date(d).getTime())));
+                      
+                      if (!recipient.signedAt || latestDate > recipient.signedAt) {
+                        recipient.signedAt = latestDate;
+                        logger.info(`Updated signedAt for ${recipient.email}: ${recipient.signedAt}`);
+                        changesMade = true;
+                      }
+                    } else if (!recipient.signedAt) {
+                      // Fallback to current time if no timestamp available
+                      recipient.signedAt = new Date();
+                      logger.info(`Set signedAt for ${recipient.email} to current time (no timestamp available)`);
+                      changesMade = true;
+                    }
                   }
                   
-                  // Update lastSigningUrlAccessed if member has accessDate or similar
-                  if (member.accessDate || member.lastViewedDate) {
-                    const lastAccessed = new Date(member.accessDate || member.lastViewedDate);
-                    if (!recipient.lastSigningUrlAccessed || recipient.lastSigningUrlAccessed.getTime() !== lastAccessed.getTime()) {
-                      recipient.lastSigningUrlAccessed = lastAccessed;
+                  // Update lastSigningUrlAccessed timestamp with enhanced date handling
+                  const possibleAccessDates = [
+                    member.accessDate,
+                    member.lastViewedDate,
+                    member.viewDate,
+                    member.lastAccessDate,
+                    member.dateViewed,
+                    member.dateAccessed,
+                    member.emailDate,
+                    member.statusUpdateDate
+                  ].filter(date => date);
+                  
+                  if (possibleAccessDates.length > 0) {
+                    const latestAccessDate = new Date(Math.max(...possibleAccessDates.map(d => new Date(d).getTime())));
+                    
+                    if (!recipient.lastSigningUrlAccessed || latestAccessDate > recipient.lastSigningUrlAccessed) {
+                      recipient.lastSigningUrlAccessed = latestAccessDate;
                       logger.info(`Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
                       changesMade = true;
                     }
@@ -454,6 +508,11 @@ exports.checkDocumentStatus = async (req, res, next) => {
           });
           
           logger.info(`Total recipient updates made: ${recipientUpdatesCount}`);
+          
+          // Update overall document status if any recipients changed
+          if (recipientUpdatesCount > 0) {
+            updateDocumentStatus(document);
+          }
         } else {
           logger.info('No participant sets found in Adobe Sign response');
           
@@ -704,12 +763,6 @@ exports.sendReminder = async (req, res, next) => {
       
       if (participantSets && participantSets.length > 0) {
         adobeSyncSucceeded = true;
-      }
-      
-      logger.info(`Participant sets count: ${participantSets.length || 0}`);
-      
-      // Use the same logic as checkDocumentStatus for consistency
-      if (participantSets && participantSets.length > 0) {
         logger.info(`Processing ${participantSets.length} participant sets for reminder status update`);
         
         participantSets.forEach((participantSet, setIndex) => {
@@ -736,6 +789,7 @@ exports.sendReminder = async (req, res, next) => {
               if (recipient) {
                 const oldStatus = recipient.status;
                 const oldOrder = recipient.order;
+                let statusChanged = false;
                 
                 // Update order from Adobe Sign participant set (for proper sequential signing)
                 if (participantSet.order !== undefined && participantSet.order !== null) {
@@ -745,60 +799,130 @@ exports.sendReminder = async (req, res, next) => {
                   }
                 }
                 
-                // Map Adobe Sign statuses to our enum values (same as checkDocumentStatus)
-                const statusMapping = {
-                  'ACTIVE': 'sent',
-                  'OUT_FOR_SIGNATURE': 'sent', 
-                  'WAITING_FOR_VERIFICATION': 'sent',
-                  'WAITING_FOR_FAXING': 'sent',
-                  'WAITING_FOR_MY_SIGNATURE': 'sent',
-                  'WAITING_FOR_COUNTER_SIGNATURE': 'sent',
-                  'WAITING_FOR_MY_REVIEW': 'sent',
-                  'WAITING_FOR_MY_ACKNOWLEDGEMENT': 'sent',
-                  'DELEGATED': 'sent',
-                  'COMPLETED': 'signed',
-                  'SIGNED': 'signed',
-                  'FORM_FILLED': 'signed',
-                  'APPROVED': 'signed',
-                  'ACKNOWLEDGED': 'signed',
-                  'ACCEPTED': 'signed',
-                  'DELIVERED': 'signed',
-                  'DECLINED': 'declined',
-                  'CANCELLED': 'declined',
-                  'REJECTED': 'declined',
-                  'EXPIRED': 'expired',
-                  'RECALLED': 'expired',
-                  'WAITING_FOR_AUTHORING': 'waiting',
-                  'WAITING_FOR_MY_APPROVAL': 'waiting',
-                  'AUTHORING': 'waiting',
-                  'NOT_YET_VISIBLE': 'pending'
-                };
+                // Map Adobe Sign statuses to our enum values with PROPER STATUS MAPPING
+                let newStatus = 'sent'; // Default
+                const adobeStatus = member.status;
+                const setStatus = participantSet.status;
                 
-                const adobeStatus = member.status?.toUpperCase();
-                const newStatus = statusMapping[adobeStatus] || member.status?.toLowerCase() || 'pending';
+                // Handle combination of member and participant set statuses (FIXED LOGIC)
+                if (adobeStatus === 'ACTIVE' && setStatus === 'WAITING_FOR_OTHERS') {
+                  // This person has signed and is waiting for others
+                  newStatus = 'signed';
+                  // Set timestamps for signed recipients with enhanced date handling
+                  if (!recipient.signedAt) {
+                    const possibleSigningDates = [
+                      member.completedDate,
+                      member.statusUpdateDate,
+                      member.signedDate,
+                      member.lastModified,
+                      member.dateCompleted,
+                      member.dateSigned
+                    ].filter(date => date);
+                    
+                    if (possibleSigningDates.length > 0) {
+                      const latestDate = new Date(Math.max(...possibleSigningDates.map(d => new Date(d).getTime())));
+                      recipient.signedAt = latestDate;
+                      logger.info(`REMINDER: Set signedAt for ${recipient.email}: ${recipient.signedAt}`);
+                    } else {
+                      recipient.signedAt = new Date();
+                      logger.info(`REMINDER: Set signedAt for ${recipient.email} to current time`);
+                    }
+                  }
+                } else if (adobeStatus === 'ACTIVE' && setStatus === 'NOT_YET_VISIBLE') {
+                  // This person is not yet visible in the signing flow
+                  newStatus = 'waiting';
+                } else if (adobeStatus === 'ACTIVE' && setStatus === 'WAITING_FOR_MY_SIGNATURE') {
+                  // This person is the current signer
+                  newStatus = 'sent';
+                } else if (['SIGNED', 'COMPLETED', 'APPROVED', 'ACCEPTED', 'FORM_FILLED', 'ACKNOWLEDGED', 'DELIVERED'].includes(adobeStatus)) {
+                  newStatus = 'signed';
+                  // Set timestamps for signed recipients with enhanced date handling
+                  if (!recipient.signedAt) {
+                    const possibleSigningDates = [
+                      member.completedDate,
+                      member.statusUpdateDate,
+                      member.signedDate,
+                      member.lastModified,
+                      member.dateCompleted,
+                      member.dateSigned
+                    ].filter(date => date);
+                    
+                    if (possibleSigningDates.length > 0) {
+                      const latestDate = new Date(Math.max(...possibleSigningDates.map(d => new Date(d).getTime())));
+                      recipient.signedAt = latestDate;
+                      logger.info(`REMINDER: Set signedAt for ${recipient.email}: ${recipient.signedAt}`);
+                    } else {
+                      recipient.signedAt = new Date();
+                      logger.info(`REMINDER: Set signedAt for ${recipient.email} to current time`);
+                    }
+                  }
+                } else if (['DECLINED', 'REJECTED', 'RECALLED', 'CANCELLED', 'CANCELED'].includes(adobeStatus)) {
+                  newStatus = 'declined';
+                } else if (['EXPIRED'].includes(adobeStatus)) {
+                  newStatus = 'expired';
+                } else if (['NOT_YET_VISIBLE', 'WAITING_FOR_OTHERS', 'WAITING_FOR_MY_PREREQUISITES', 'WAITING_FOR_PREREQUISITE', 'WAITING_FOR_AUTHORING', 'AUTHORING'].includes(adobeStatus)) {
+                  newStatus = 'waiting';
+                } else if (['WAITING_FOR_MY_SIGNATURE', 'WAITING_FOR_MY_APPROVAL', 'OUT_FOR_SIGNATURE', 'ACTION_REQUESTED', 'WAITING_FOR_SIGNATURE', 'ACTIVE', 'WAITING_FOR_VERIFICATION', 'WAITING_FOR_FAXING', 'WAITING_FOR_COUNTER_SIGNATURE', 'WAITING_FOR_MY_REVIEW', 'WAITING_FOR_MY_ACKNOWLEDGEMENT', 'DELEGATED'].includes(adobeStatus)) {
+                  newStatus = 'sent';
+                } else if (['VIEWED', 'EMAIL_VIEWED', 'DOCUMENT_VIEWED'].includes(adobeStatus)) {
+                  newStatus = 'viewed';
+                } else if (['DELEGATION_PENDING', 'CREATED', 'DRAFT'].includes(adobeStatus)) {
+                  newStatus = 'pending';
+                } else {
+                  // For unrecognized statuses, check overall agreement status
+                  if (agreementInfo.status === 'SIGNED' || agreementInfo.status === 'COMPLETED') {
+                    newStatus = 'signed';
+                  } else {
+                    newStatus = 'sent';
+                  }
+                }
                 
-                // Only update status if it has actually changed
+                // Update lastSigningUrlAccessed timestamp
+                const possibleAccessDates = [
+                  member.accessDate,
+                  member.lastViewedDate,
+                  member.viewDate,
+                  member.lastAccessDate,
+                  member.dateViewed,
+                  member.dateAccessed,
+                  member.emailDate,
+                  member.statusUpdateDate
+                ].filter(date => date);
+                
+                if (possibleAccessDates.length > 0) {
+                  const latestAccessDate = new Date(Math.max(...possibleAccessDates.map(d => new Date(d).getTime())));
+                  if (!recipient.lastSigningUrlAccessed || latestAccessDate > recipient.lastSigningUrlAccessed) {
+                    recipient.lastSigningUrlAccessed = latestAccessDate;
+                    logger.info(`REMINDER: Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
+                  }
+                }
+                
                 if (oldStatus !== newStatus) {
                   recipient.status = newStatus;
-                  logger.info(`REMINDER: Recipient ${recipient.email} status updated from ${oldStatus} to ${recipient.status} (Adobe status: ${adobeStatus})`);
-                } else {
-                  logger.debug(`REMINDER: No status change for ${recipient.email}: remains ${recipient.status} (Adobe status: ${adobeStatus})`);
+                  statusChanged = true;
+                  logger.info(`REMINDER: Updated status for ${recipient.email}: ${oldStatus} → ${newStatus}`);
                 }
                 
-                // Update signedAt timestamp when status becomes 'signed'
-                if (recipient.status === 'signed' && member.completedDate && !recipient.signedAt) {
-                  recipient.signedAt = new Date(member.completedDate);
-                  logger.info(`REMINDER: Updated signedAt for ${recipient.email}: ${recipient.signedAt}`);
-                } else if (recipient.status === 'signed' && !member.completedDate && !recipient.signedAt) {
-                  // Fallback: use current timestamp if Adobe doesn't provide completedDate
-                  recipient.signedAt = new Date();
-                  logger.info(`REMINDER: Set signedAt to current time for ${recipient.email} (no completedDate from Adobe)`);
+                // Update access timestamp if available
+                if (member.lastViewedDate || member.accessDate) {
+                  const lastAccessed = new Date(member.accessDate || member.lastViewedDate);
+                  if (!recipient.lastSigningUrlAccessed || 
+                      recipient.lastSigningUrlAccessed.getTime() < lastAccessed.getTime()) {
+                    recipient.lastSigningUrlAccessed = lastAccessed;
+                    logger.info(`REMINDER: Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
+                  }
                 }
                 
-                // Update lastSigningUrlAccessed if member has accessDate or similar
-                if (member.accessDate || member.lastViewedDate) {
-                  recipient.lastSigningUrlAccessed = new Date(member.accessDate || member.lastViewedDate);
-                  logger.info(`REMINDER: Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
+                // Always set signedAt for signed recipients if missing
+                if (recipient.status === 'signed' && !recipient.signedAt) {
+                  recipient.signedAt = new Date(member.completedDate || Date.now());
+                  statusChanged = true;
+                  logger.info(`REMINDER: Set missing signedAt for ${recipient.email}: ${recipient.signedAt}`);
+                }
+                
+                if (statusChanged) {
+                  logger.info(`REMINDER: Status change detected - updating document overall status`);
+                  updateDocumentStatus(document);
                 }
               } else {
                 logger.warn(`REMINDER: Member ${member.email} not found in local recipients`);
@@ -815,7 +939,7 @@ exports.sendReminder = async (req, res, next) => {
           logger.info(`  ${index + 1}. ${recipient.name} (${recipient.email}): order=${recipient.order}, status=${recipient.status}, signedAt=${recipient.signedAt}`);
         });
         
-        logger.info('Updated recipient statuses from Adobe Sign before sending reminders');
+        logger.info('✅ CRITICAL: Updated recipient statuses from Adobe Sign before sending reminders');
       } else {
         logger.warn('REMINDER: No participant sets found in Adobe Sign response');
       }
@@ -886,9 +1010,9 @@ exports.sendReminder = async (req, res, next) => {
       logger.warn(`⚠️  Database shows recipients with potentially stale statuses. Manual verification recommended.`);
     }
     
-    // Find recipients who haven't signed yet (WARNING: may use stale statuses if Adobe sync failed)
+    // Find recipients who haven't signed yet, filtering out 'signed', 'completed', 'delivered', 'declined', etc.
     const unsignedRecipients = document.recipients.filter(recipient => 
-      !['signed', 'completed', 'delivered', 'declined'].includes(recipient.status?.toLowerCase())
+      !['signed', 'completed', 'delivered', 'declined', 'expired'].includes(recipient.status?.toLowerCase())
     );
     
     // Log warning if Adobe sync failed and we're using potentially stale data
@@ -944,25 +1068,37 @@ exports.sendReminder = async (req, res, next) => {
         
         if (isSequentialSigning) {
           // Sequential signing: Find the first incomplete participant set
-          // A set is complete if ALL its members are signed/completed/declined
+          // A set is complete if ALL its members are signed/completed/declined OR if it's waiting for others
           const firstIncompleteSet = sortedParticipantSets.find(set => {
-            // Check if the set status indicates completion
-            if (["SIGNED", "COMPLETED", "DECLINED"].includes(set.status)) {
+            // Check if the set status indicates completion or if it's waiting for others (already completed their part)
+            if (["SIGNED", "COMPLETED", "DECLINED", "WAITING_FOR_OTHERS"].includes(set.status)) {
               logger.info(`REMINDER: Skipping completed set with order ${set.order} (status: ${set.status})`);
-              return false; // Set is complete
+              return false; // Set is complete - members have done their part
             }
-            // If set status is undefined/unknown, check member statuses
+            // Check if set is not yet visible
+            if (["NOT_YET_VISIBLE", "WAITING", "WAITING_FOR_PREREQUISITES"].includes(set.status)) {
+              logger.info(`REMINDER: Skipping not-yet-visible set with order ${set.order} (status: ${set.status})`);
+              return false; // Set is not yet active
+            }
+            // If set status indicates it's the current active set
+            if (["WAITING_FOR_MY_SIGNATURE", "WAITING_FOR_MY_APPROVAL", "OUT_FOR_SIGNATURE"].includes(set.status)) {
+              logger.info(`REMINDER: Found active set with order ${set.order} (status: ${set.status})`);
+              return true; // This is the active set
+            }
+            // For any other status, check member statuses to be safe
             if (set.memberInfos && set.memberInfos.length > 0) {
-              // Only return true if at least one member is unsigned
-              const hasUnsignedMembers = set.memberInfos.some(member => !["SIGNED", "COMPLETED", "DECLINED"].includes(member.status));
+              // Only return true if at least one member needs to sign
+              const hasUnsignedMembers = set.memberInfos.some(member => 
+                ["WAITING_FOR_MY_SIGNATURE", "WAITING_FOR_MY_APPROVAL", "OUT_FOR_SIGNATURE", "ACTION_REQUESTED"].includes(member.status)
+              );
               if (hasUnsignedMembers) {
-                logger.info(`REMINDER: Found incomplete set with order ${set.order} - has unsigned members`);
+                logger.info(`REMINDER: Found incomplete set with order ${set.order} - has members waiting to sign`);
               } else {
-                logger.info(`REMINDER: Skipping set with order ${set.order} - all members are signed`);
+                logger.info(`REMINDER: Skipping set with order ${set.order} - no members waiting to sign`);
               }
               return hasUnsignedMembers;
             }
-            return true; // If no member info, assume incomplete
+            return false; // If no member info, assume complete
           });
 
           if (firstIncompleteSet) {
@@ -1345,7 +1481,7 @@ exports.downloadDocument = async (req, res, next) => {
     
     // Get file stats
     const stats = fs.statSync(fileToDownload);
-    const mimeType = mime.getType(fileToDownload) || 'application/octet-stream';
+    const mimeType = mime.default.getType(fileToDownload) || 'application/octet-stream';
     
     // Set response headers
     res.setHeader('Content-Type', mimeType);
@@ -1386,49 +1522,7 @@ exports.downloadDocument = async (req, res, next) => {
  */
 exports.uploadPrepareAndSend = async (req, res, next) => {
   try {
-    // Step 1: Upload and process document - support all three upload methods
-    let filePath = null;
-    let filename = null;
-    let originalname = null;
-    let mimetype = null;
-    let size = null;
-    
-    // Method 1: File upload (original uploadDocumentWithData)
-    if (req.files && (req.files.document || req.files.documents)) {
-      // Support both 'document' and 'documents' field names
-      const documentFile = req.files.document ? req.files.document[0] : req.files.documents[0];
-      ({ filename, originalname, mimetype, size, path: filePath } = documentFile);
-      logger.info(`Method 1: File upload - ${originalname}`);
-    }
-    // Method 2 & 3: Document URL (from uploadDocumentFromUrl)
-    else if (req.body.documentUrl) {
-      const documentUrl = req.body.documentUrl;
-      
-      if (!documentUrl) {
-        return next(new ApiError(400, 'Document URL is required when not uploading a file'));
-      }
-      
-      // Download document from URL
-      try {
-        const downloadResult = await urlUtils.downloadDocumentFromUrl(documentUrl);
-        
-        filePath = downloadResult.path;
-        originalname = downloadResult.originalName;
-        filename = downloadResult.filename;
-        mimetype = downloadResult.mimetype;
-        size = downloadResult.size;
-        
-        logger.info(`Method 2/3: URL download - ${documentUrl} -> ${originalname}`);
-      } catch (downloadError) {
-        logger.error(`Error downloading document from URL: ${downloadError.message}`);
-        return next(new ApiError(400, `Failed to download document from URL: ${downloadError.message}`));
-      }
-    }
-    else {
-      return next(new ApiError(400, 'No document uploaded or document URL provided. Please provide either a file upload or documentUrl in request body.'));
-    }
-
-    // Parse JSON data - support multiple sources
+    // Step 0: Parse JSON data first to determine if we have template data
     let templateData = {};
     
     // Method 1: JSON data from uploaded file
@@ -1492,6 +1586,54 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
         logger.error(`Error parsing JSON data from body: ${jsonError.message}`);
         return next(new ApiError(400, 'Invalid JSON data in request body'));
       }
+    }
+
+    // Determine if we have template data for format preference
+    const hasTemplateData = Object.keys(templateData).length > 0;
+    logger.info(`Template data detection: ${hasTemplateData ? 'YES' : 'NO'} (${Object.keys(templateData).length} variables)`);
+
+    // Step 1: Upload and process document - support all three upload methods
+    let filePath = null;
+    let filename = null;
+    let originalname = null;
+    let mimetype = null;
+    let size = null;
+    
+    // Method 1: File upload (original uploadDocumentWithData)
+    if (req.files && (req.files.document || req.files.documents)) {
+      // Support both 'document' and 'documents' field names
+      const documentFile = req.files.document ? req.files.document[0] : req.files.documents[0];
+      ({ filename, originalname, mimetype, size, path: filePath } = documentFile);
+      logger.info(`Method 1: File upload - ${originalname}`);
+    }
+    // Method 2 & 3: Document URL (from uploadDocumentFromUrl)
+    else if (req.body.documentUrl) {
+      const documentUrl = req.body.documentUrl;
+      
+      if (!documentUrl) {
+        return next(new ApiError(400, 'Document URL is required when not uploading a file'));
+      }
+      
+      // Download document from URL with template data awareness
+      try {
+        logger.info(`Downloading from URL with template data: ${hasTemplateData}`);
+        const downloadResult = await urlUtils.downloadDocumentFromUrl(documentUrl, null, 0, {}, hasTemplateData);
+        
+        filePath = downloadResult.path;
+        originalname = downloadResult.originalName;
+        filename = downloadResult.filename;
+        mimetype = downloadResult.mimetype;
+        size = downloadResult.size;
+        
+        logger.info(`Method 2/3: URL download - ${documentUrl} -> ${originalname}`);
+        logger.info(`Downloaded file type: ${mimetype}, extension: ${path.extname(originalname)}`);
+      } catch (downloadError) {
+        logger.error(`Error downloading document from URL: ${downloadError.message}`);
+        return next(new ApiError(400, `Failed to download document from URL: ${downloadError.message}`));
+      }
+    }
+    else {
+      return next(new ApiError(400, 'No document uploaded or document URL provided. Please provide either a file upload or documentUrl in request body.'));
     }
 
     // Initialize document data
@@ -2113,11 +2255,217 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
 };
 
 /**
- * Update document status based on recipients' statuses
- * @param {Object} document - Document object
+ * Automatically sync recipient statuses from Adobe Sign
+ * This function ensures statuses are always up-to-date before any operations
+ */
+const syncStatusFromAdobeSign = async (document) => {
+  try {
+    if (!document.adobeAgreementId) {
+      logger.warn('Cannot sync status: document has no Adobe agreement ID');
+      return false;
+    }
+
+    const accessToken = await getAccessToken();
+    const agreementInfo = await getComprehensiveAgreementInfo(accessToken, document.adobeAgreementId);
+    
+    logger.info(`AUTO-SYNC: Syncing statuses for document ${document._id}`);
+    logger.info(`AUTO-SYNC: Agreement status: ${agreementInfo.status}`);
+    
+    // Get participant sets from Adobe Sign (check multiple possible locations)
+    const participantSets = agreementInfo.participants?.participantSets || 
+                            agreementInfo.participantSets || 
+                            agreementInfo.participantSetsInfo ||
+                            [];
+    
+    if (!participantSets || participantSets.length === 0) {
+      logger.warn('AUTO-SYNC: No participant sets found in Adobe Sign response');
+      logger.info('AUTO-SYNC: Available keys in Adobe response:', Object.keys(agreementInfo));
+      return false;
+    }
+    
+    logger.info(`AUTO-SYNC: Found ${participantSets.length} participant sets`);
+    
+    // Debug: Log the participant sets structure
+    participantSets.forEach((set, index) => {
+      logger.info(`AUTO-SYNC: Participant set ${index}:`, {
+        id: set.id,
+        order: set.order,
+        role: set.role,
+        status: set.status,
+        memberCount: set.memberInfos?.length || 0
+      });
+    });
+
+    let statusesUpdated = false;
+
+    // Update recipient statuses from Adobe Sign data
+    participantSets.forEach((participantSet, setIndex) => {
+      logger.info(`AUTO-SYNC: Processing participant set ${setIndex}:`, {
+        order: participantSet.order,
+        role: participantSet.role,
+        status: participantSet.status,
+        memberInfosCount: participantSet.memberInfos?.length || 0
+      });
+      
+      if (participantSet.memberInfos) {
+        participantSet.memberInfos.forEach((member, memberIndex) => {
+          logger.info(`AUTO-SYNC: Member ${memberIndex} in set ${setIndex}:`, {
+            email: member.email,
+            status: member.status,
+            completedDate: member.completedDate,
+            userId: member.userId
+          });
+          
+          const recipient = document.recipients.find(r => 
+            r.email.toLowerCase() === member.email.toLowerCase()
+          );
+          
+          if (recipient) {
+            const oldStatus = recipient.status;
+            const oldOrder = recipient.order;
+            
+            // Update order from Adobe Sign participant set
+            if (participantSet.order !== undefined && participantSet.order !== null) {
+              recipient.order = participantSet.order;
+              if (oldOrder !== recipient.order) {
+                logger.info(`AUTO-SYNC: Updated order for ${recipient.email}: ${oldOrder} → ${recipient.order}`);
+                statusesUpdated = true;
+              }
+            }
+            
+            // Map Adobe Sign statuses to our enum values
+            let newStatus = 'sent'; // Default
+            
+            // Check participant set status and member status
+            const participantSetStatus = participantSet.status;
+            const memberStatus = member.status;
+            
+            logger.info(`AUTO-SYNC: Mapping statuses for ${member.email}: set=${participantSetStatus}, member=${memberStatus}`);
+            
+            // Priority logic for status mapping:
+            // 1. If member has a completion status (SIGNED, COMPLETED), use that
+            // 2. If member status is ACTIVE but participant set is WAITING_FOR_OTHERS, they have signed
+            // 3. Otherwise use member status or fall back to participant set status
+            
+            let statusToMap = memberStatus;
+            
+            // Special case: If member is ACTIVE but participant set is WAITING_FOR_OTHERS,
+            // this usually means they have signed (in sequential signing)
+            if (memberStatus === 'ACTIVE' && participantSetStatus === 'WAITING_FOR_OTHERS') {
+              statusToMap = 'SIGNED'; // Treat as signed
+              logger.info(`AUTO-SYNC: ${member.email} has signed (ACTIVE + WAITING_FOR_OTHERS)`);
+            }
+            
+            switch (statusToMap) {
+              case 'SIGNED':
+              case 'COMPLETED':
+                newStatus = 'signed';
+                // Set timestamps for signed recipients
+                if (!recipient.signedAt) {
+                  recipient.signedAt = new Date(member.completedDate || Date.now());
+                  logger.info(`AUTO-SYNC: Set signedAt for ${recipient.email}: ${recipient.signedAt}`);
+                  statusesUpdated = true;
+                }
+                if (!recipient.lastSigningUrlAccessed) {
+                  recipient.lastSigningUrlAccessed = new Date(member.completedDate || recipient.signedAt || Date.now());
+                  logger.info(`AUTO-SYNC: Set lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
+                  statusesUpdated = true;
+                }
+                break;
+              case 'WAITING_FOR_OTHERS':
+                // This means they have signed but waiting for others to sign
+                newStatus = 'signed';
+                if (!recipient.signedAt) {
+                  recipient.signedAt = new Date(member.completedDate || member.createdDate || Date.now());
+                  logger.info(`AUTO-SYNC: Set signedAt for ${recipient.email} (waiting for others): ${recipient.signedAt}`);
+                  statusesUpdated = true;
+                }
+                if (!recipient.lastSigningUrlAccessed) {
+                  recipient.lastSigningUrlAccessed = new Date(member.completedDate || recipient.signedAt || Date.now());
+                  logger.info(`AUTO-SYNC: Set lastSigningUrlAccessed for ${recipient.email} (waiting for others): ${recipient.lastSigningUrlAccessed}`);
+                  statusesUpdated = true;
+                }
+                break;
+              case 'WAITING_FOR_MY_SIGNATURE':
+              case 'OUT_FOR_SIGNATURE':
+                newStatus = 'sent';
+                break;
+              case 'ACTIVE':
+                // Check participant set status to determine the correct mapping
+                if (participantSetStatus === 'WAITING_FOR_MY_SIGNATURE') {
+                  newStatus = 'sent'; // Current active signer
+                } else if (participantSetStatus === 'NOT_YET_VISIBLE') {
+                  newStatus = 'waiting'; // Sequential - not their turn yet
+                } else {
+                  newStatus = 'sent'; // Default for ACTIVE
+                }
+                break;
+              case 'NOT_YET_VISIBLE':
+                // Sequential signing - not yet their turn
+                newStatus = 'waiting';
+                break;
+              case 'DECLINED':
+                newStatus = 'declined';
+                break;
+              case 'EXPIRED':
+                newStatus = 'expired';
+                break;
+              default:
+                logger.warn(`AUTO-SYNC: Unknown status for ${member.email}: ${statusToMap}, defaulting to 'sent'`);
+                newStatus = 'sent';
+            }
+            
+            if (oldStatus !== newStatus) {
+              recipient.status = newStatus;
+              statusesUpdated = true;
+              logger.info(`AUTO-SYNC: Updated status for ${recipient.email}: ${oldStatus} → ${newStatus}`);
+            }
+            
+            // Update access timestamp if available
+            if (member.lastViewedDate || member.accessDate) {
+              const newAccessTime = new Date(member.accessDate || member.lastViewedDate);
+              if (!recipient.lastSigningUrlAccessed || recipient.lastSigningUrlAccessed < newAccessTime) {
+                recipient.lastSigningUrlAccessed = newAccessTime;
+                logger.info(`AUTO-SYNC: Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
+                statusesUpdated = true;
+              }
+            }
+          } else {
+            logger.warn(`AUTO-SYNC: Member ${member.email} not found in local recipients`);
+          }
+        });
+      }
+    });
+    
+    if (statusesUpdated) {
+      // Update the overall document status based on recipient statuses
+      updateDocumentStatus(document);
+      
+      await document.save();
+      logger.info('AUTO-SYNC: ✅ Successfully updated recipient statuses from Adobe Sign');
+      
+      // Log final recipient statuses after update
+      logger.info('AUTO-SYNC: Updated recipient statuses:');
+      document.recipients.forEach((recipient, index) => {
+        logger.info(`  ${index + 1}. ${recipient.name} (${recipient.email}): order=${recipient.order}, status=${recipient.status}, signedAt=${recipient.signedAt}`);
+      });
+      
+      logger.info(`AUTO-SYNC: Overall document status: ${document.status}`);
+    } else {
+      logger.info('AUTO-SYNC: No status updates needed - all statuses are current');
+    }
+    
+    return true;
+  } catch (error) {
+    logger.error(`AUTO-SYNC: Error syncing status from Adobe Sign: ${error.message}`);
+    return false;
+  }
+};
+
+/**
+ * Update document overall status based on recipient statuses
  */
 const updateDocumentStatus = (document) => {
-  // Count recipients by status
   const statusCounts = document.recipients.reduce((counts, recipient) => {
     counts[recipient.status] = (counts[recipient.status] || 0) + 1;
     return counts;
@@ -2126,156 +2474,28 @@ const updateDocumentStatus = (document) => {
   const totalRecipients = document.recipients.length;
   const signedCount = statusCounts.signed || 0;
   const declinedCount = statusCounts.declined || 0;
+  const expiredCount = statusCounts.expired || 0;
   
-  // Update document status
+  const oldStatus = document.status;
+  let newStatus = oldStatus;
+  
   if (declinedCount > 0) {
-    document.status = 'cancelled';
+    newStatus = 'cancelled';
+  } else if (expiredCount > 0) {
+    newStatus = 'expired';
   } else if (signedCount === totalRecipients) {
-    document.status = 'completed';
+    newStatus = 'completed';
+    if (!document.completedAt) {
+      document.completedAt = new Date();
+    }
   } else if (signedCount > 0 && signedCount < totalRecipients) {
-    document.status = 'partially_signed';
+    newStatus = 'partially_signed';
+  } else {
+    newStatus = 'out_for_signature';
   }
   
-  logger.info(`Updated document status to ${document.status} (${signedCount}/${totalRecipients} signed)`);
-};
-
-/**
- * Manually update recipient timestamps (fallback when Adobe Sign sync fails)
- * @route POST /api/documents/:id/update-timestamps
- */
-exports.updateRecipientTimestamps = async (req, res, next) => {
-  try {
-    const document = await Document.findById(req.params.id);
-    
-    if (!document) {
-      return next(new ApiError(404, 'Document not found'));
-    }
-
-    const { recipientUpdates } = req.body;
-    
-    if (!recipientUpdates || !Array.isArray(recipientUpdates)) {
-      return next(new ApiError(400, 'recipientUpdates array is required'));
-    }
-
-    logger.info(`Manual timestamp update requested for document: ${document.originalName}`);
-    
-    let updatesApplied = 0;
-    const updateResults = [];
-
-    recipientUpdates.forEach(update => {
-      const { email, status, signedAt, lastSigningUrlAccessed } = update;
-      
-      if (!email) {
-        updateResults.push({ email: 'unknown', error: 'Email is required' });
-        return;
-      }
-
-      const recipient = document.recipients.find(r => 
-        r.email.toLowerCase() === email.toLowerCase()
-      );
-
-      if (!recipient) {
-        updateResults.push({ email, error: 'Recipient not found' });
-        return;
-      }
-
-      const changes = [];
-
-      // Update status if provided
-      if (status && status !== recipient.status) {
-        const oldStatus = recipient.status;
-        recipient.status = status;
-        changes.push(`status: ${oldStatus} → ${status}`);
-      }
-
-      // Update signedAt timestamp
-      if (signedAt) {
-        const signedDate = new Date(signedAt);
-        if (isNaN(signedDate.getTime())) {
-          updateResults.push({ email, error: 'Invalid signedAt date format' });
-          return;
-        }
-        recipient.signedAt = signedDate;
-        changes.push(`signedAt: ${signedDate.toISOString()}`);
-      } else if (status === 'signed' && !recipient.signedAt) {
-        // Auto-set signedAt if marking as signed without timestamp
-        recipient.signedAt = new Date();
-        changes.push(`signedAt: ${recipient.signedAt.toISOString()} (auto-set)`);
-      }
-
-      // Update lastSigningUrlAccessed timestamp
-      if (lastSigningUrlAccessed) {
-        const accessDate = new Date(lastSigningUrlAccessed);
-        if (isNaN(accessDate.getTime())) {
-          updateResults.push({ email, error: 'Invalid lastSigningUrlAccessed date format' });
-          return;
-        }
-        recipient.lastSigningUrlAccessed = accessDate;
-        changes.push(`lastSigningUrlAccessed: ${accessDate.toISOString()}`);
-      } else if ((status === 'viewed' || status === 'signed') && !recipient.lastSigningUrlAccessed) {
-        // Auto-set access time if marking as viewed/signed without timestamp
-        recipient.lastSigningUrlAccessed = recipient.signedAt || new Date();
-        changes.push(`lastSigningUrlAccessed: ${recipient.lastSigningUrlAccessed.toISOString()} (auto-set)`);
-      }
-
-      if (changes.length > 0) {
-        updateResults.push({
-          email,
-          success: true,
-          changes: changes.join(', ')
-        });
-        updatesApplied++;
-        logger.info(`Updated ${email}: ${changes.join(', ')}`);
-      } else {
-        updateResults.push({
-          email,
-          success: true,
-          changes: 'No changes needed'
-        });
-      }
-    });
-
-    // Update overall document status if needed
-    updateDocumentStatus(document);
-
-    await document.save();
-
-    logger.info(`Manual timestamp update completed: ${updatesApplied} recipients updated`);
-
-    // Create log entry
-    await Log.create({
-      level: 'info',
-      message: `Manual timestamp update completed for document: ${document.originalName}`,
-      documentId: document._id,
-      ipAddress: req.ip,
-      requestPath: req.originalUrl,
-      requestMethod: req.method,
-      metadata: {
-        updatesApplied,
-        results: updateResults
-      }
-    });
-
-    return res.json(formatResponse(
-      200,
-      'Recipient timestamps updated successfully',
-      {
-        documentId: document._id,
-        documentName: document.originalName,
-        updatesApplied,
-        results: updateResults,
-        currentRecipients: document.recipients.map(r => ({
-          name: r.name,
-          email: r.email,
-          status: r.status,
-          signedAt: r.signedAt,
-          lastSigningUrlAccessed: r.lastSigningUrlAccessed
-        }))
-      }
-    ));
-
-  } catch (error) {
-    logger.error(`Error updating recipient timestamps: ${error.message}`);
-    return next(new ApiError(500, 'Failed to update recipient timestamps'));
+  if (oldStatus !== newStatus) {
+    document.status = newStatus;
+    logger.info(`Document status updated from ${oldStatus} to ${newStatus}`);
   }
 };

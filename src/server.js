@@ -18,6 +18,7 @@ const logRoutes = require('./routes/log.routes');
 const apiKeyRoutes = require('./routes/apiKey.routes');
 const emailRoutes = require('./routes/email.routes');
 const webhookRoutes = require('./routes/webhook.routes');
+const testRoutes = require('./routes/test.routes');
 
 // Import middleware
 const errorMiddleware = require('./middleware/error');
@@ -112,6 +113,7 @@ app.use('/api/logs', logRoutes);
 app.use('/api/auth/api-keys', apiKeyRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/test', testRoutes);
 
 // Handle 404 errors - use a regular path instead of wildcard
 app.use((req, res, next) => {

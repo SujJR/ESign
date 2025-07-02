@@ -6,9 +6,10 @@ const logger = require('./logger');
 /**
  * Converts Google Docs/Sheets/Slides URLs to direct download URLs
  * @param {string} url - The Google Docs URL
+ * @param {string} [preferredFormat] - Preferred format: 'docx', 'pdf', 'auto'
  * @returns {string} - Direct download URL or original URL if not a Google Docs URL
  */
-const convertGoogleDocsUrl = (url) => {
+const convertGoogleDocsUrl = (url, preferredFormat = 'auto') => {
   try {
     // Check if it's a Google Docs URL
     if (url.includes('docs.google.com/document')) {
@@ -16,9 +17,19 @@ const convertGoogleDocsUrl = (url) => {
       const docIdMatch = url.match(/\/document\/d\/([a-zA-Z0-9-_]+)/);
       if (docIdMatch && docIdMatch[1]) {
         const docId = docIdMatch[1];
-        // Convert to direct PDF download URL
-        const downloadUrl = `https://docs.google.com/document/d/${docId}/export?format=pdf`;
-        logger.info(`Converted Google Docs URL to direct download: ${downloadUrl}`);
+        
+        // Determine format based on preference and template needs
+        let format = 'docx'; // Default to DOCX for template processing
+        if (preferredFormat === 'pdf') {
+          format = 'pdf';
+        } else if (preferredFormat === 'auto') {
+          // Auto-detect: prefer DOCX for template processing
+          format = 'docx';
+        }
+        
+        // Convert to direct download URL with specified format
+        const downloadUrl = `https://docs.google.com/document/d/${docId}/export?format=${format}`;
+        logger.info(`Converted Google Docs URL to direct download (${format.toUpperCase()}): ${downloadUrl}`);
         return downloadUrl;
       }
     } else if (url.includes('docs.google.com/spreadsheets')) {
@@ -64,17 +75,25 @@ const convertGoogleDocsUrl = (url) => {
  * @param {string} [filename] - Optional custom filename
  * @param {number} [retryCount=0] - Number of retry attempts (used internally)
  * @param {Object} [customHeaders={}] - Custom headers to include in the request
+ * @param {boolean} [hasTemplateData=false] - Whether template data is provided (affects format preference)
  * @returns {Promise<Object>} - Object containing the saved file information
  */
-const downloadDocumentFromUrl = async (url, filename = null, retryCount = 0, customHeaders = {}) => {
+const downloadDocumentFromUrl = async (url, filename = null, retryCount = 0, customHeaders = {}, hasTemplateData = false) => {
   let filePath = null;
   let writer = null;
   let downloadTimeout = null;
   const MAX_RETRIES = 3;
   
   try {
-    // Convert Google Docs URLs to direct download URLs
-    const downloadUrl = convertGoogleDocsUrl(url);
+    // Determine preferred format based on template data availability
+    let preferredFormat = 'auto';
+    if (hasTemplateData && url.includes('docs.google.com/document')) {
+      preferredFormat = 'docx'; // Force DOCX for template processing
+      logger.info('Template data detected, preferring DOCX format for Google Docs download');
+    }
+    
+    // Convert Google Docs URLs to direct download URLs with format preference
+    const downloadUrl = convertGoogleDocsUrl(url, preferredFormat);
     logger.info(`Downloading document from URL: ${downloadUrl}${retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : ''}`);
     if (downloadUrl !== url) {
       logger.info(`Original URL: ${url}`);
