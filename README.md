@@ -179,21 +179,6 @@ npm run generate-keys
 5. **Track Progress**: Monitor signature status
 6. **Download Completed**: Get signed document
 
-## Testing
-
-The application includes various test scripts:
-
-```bash
-# Test authentication
-npm run test-auth
-
-# Test webhook functionality
-npm run test-webhook
-
-# Test comprehensive features
-npm run test-enhanced-features
-```
-
 ## Support
 
 For support and questions, please refer to the Adobe Sign API documentation or create an issue in this repository.
