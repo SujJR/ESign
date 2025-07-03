@@ -485,6 +485,30 @@ exports.checkDocumentStatus = async (req, res, next) => {
                       logger.info(`Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
                       changesMade = true;
                     }
+                  } else if (!recipient.lastSigningUrlAccessed) {
+                    // Fallback: Use best available timestamp
+                    let fallbackTimestamp = null;
+                    
+                    // Strategy 1: Use signedAt if available
+                    if (recipient.signedAt) {
+                      fallbackTimestamp = recipient.signedAt;
+                      logger.info(`Using signedAt as fallback for lastSigningUrlAccessed for ${recipient.email}`);
+                    }
+                    // Strategy 2: Use member completion date
+                    else if (member.completedDate) {
+                      fallbackTimestamp = new Date(member.completedDate);
+                      logger.info(`Using member completedDate as fallback for lastSigningUrlAccessed for ${recipient.email}`);
+                    }
+                    // Strategy 3: If they have a status that indicates interaction, use current time
+                    else if (['SIGNED', 'COMPLETED', 'WAITING_FOR_OTHERS'].includes(member.status)) {
+                      fallbackTimestamp = new Date();
+                      logger.info(`Using current time as fallback for lastSigningUrlAccessed for ${recipient.email} (status: ${member.status})`);
+                    }
+                    
+                    if (fallbackTimestamp) {
+                      recipient.lastSigningUrlAccessed = fallbackTimestamp;
+                      changesMade = true;
+                    }
                   }
                   
                   if (changesMade) {
@@ -508,6 +532,13 @@ exports.checkDocumentStatus = async (req, res, next) => {
           });
           
           logger.info(`Total recipient updates made: ${recipientUpdatesCount}`);
+          
+          // Try to enhance lastSigningUrlAccessed from audit trail for any recipients that still don't have it
+          try {
+            await enhanceLastSigningUrlAccessedFromAuditTrail(document);
+          } catch (error) {
+            logger.warn(`Failed to enhance timestamps from audit trail: ${error.message}`);
+          }
           
           // Update overall document status if any recipients changed
           if (recipientUpdatesCount > 0) {
@@ -895,21 +926,29 @@ exports.sendReminder = async (req, res, next) => {
                     recipient.lastSigningUrlAccessed = latestAccessDate;
                     logger.info(`REMINDER: Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
                   }
-                }
-                
-                if (oldStatus !== newStatus) {
-                  recipient.status = newStatus;
-                  statusChanged = true;
-                  logger.info(`REMINDER: Updated status for ${recipient.email}: ${oldStatus} → ${newStatus}`);
-                }
-                
-                // Update access timestamp if available
-                if (member.lastViewedDate || member.accessDate) {
-                  const lastAccessed = new Date(member.accessDate || member.lastViewedDate);
-                  if (!recipient.lastSigningUrlAccessed || 
-                      recipient.lastSigningUrlAccessed.getTime() < lastAccessed.getTime()) {
-                    recipient.lastSigningUrlAccessed = lastAccessed;
-                    logger.info(`REMINDER: Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
+                } else if (!recipient.lastSigningUrlAccessed) {
+                  // Enhanced fallback for lastSigningUrlAccessed
+                  let fallbackTimestamp = null;
+                  
+                  // Strategy 1: Use signedAt if available
+                  if (recipient.signedAt) {
+                    fallbackTimestamp = recipient.signedAt;
+                    logger.info(`REMINDER: Using signedAt as fallback for lastSigningUrlAccessed for ${recipient.email}`);
+                  }
+                  // Strategy 2: Use member completion date
+                  else if (member.completedDate) {
+                    fallbackTimestamp = new Date(member.completedDate);
+                    logger.info(`REMINDER: Using member completedDate as fallback for lastSigningUrlAccessed for ${recipient.email}`);
+                  }
+                  // Strategy 3: If they have a status that indicates interaction, use current time
+                  else if (['SIGNED', 'COMPLETED', 'VIEWED', 'WAITING_FOR_MY_SIGNATURE', 'OUT_FOR_SIGNATURE', 'ACTIVE'].includes(adobeStatus)) {
+                    fallbackTimestamp = new Date();
+                    logger.info(`REMINDER: Using current time as fallback for lastSigningUrlAccessed for ${recipient.email} (status: ${adobeStatus})`);
+                  }
+                  
+                  if (fallbackTimestamp) {
+                    recipient.lastSigningUrlAccessed = fallbackTimestamp;
+                    logger.info(`REMINDER: Set fallback lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
                   }
                 }
                 
@@ -1832,17 +1871,8 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
     
     // DEBUG: Log what we have at this point
     logger.info('=== RECIPIENT EXTRACTION DEBUG ===');
-    logger.info('Recipients from req.body:', recipients);
-    logger.info('templateData variable exists:', !!templateData);
-    logger.info('document.templateData exists:', !!document.templateData);
-    if (templateData) {
-      logger.info('templateData keys:', Object.keys(templateData));
-      logger.info('templateData.recipients:', templateData.recipients);
-    }
-    if (document.templateData) {
-      logger.info('document.templateData keys:', Object.keys(document.templateData));
-      logger.info('document.templateData.recipients:', document.templateData.recipients);
-    }
+    
+    // Continue with rest of logic...
     logger.info('===================================');
     
     // If no recipients provided, try to extract from JSON template data
@@ -2367,9 +2397,30 @@ const syncStatusFromAdobeSign = async (document) => {
                   statusesUpdated = true;
                 }
                 if (!recipient.lastSigningUrlAccessed) {
-                  recipient.lastSigningUrlAccessed = new Date(member.completedDate || recipient.signedAt || Date.now());
-                  logger.info(`AUTO-SYNC: Set lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
-                  statusesUpdated = true;
+                  // Enhanced fallback strategy for lastSigningUrlAccessed
+                  let fallbackTimestamp = null;
+                  
+                  // Strategy 1: Use member completion date
+                  if (member.completedDate) {
+                    fallbackTimestamp = new Date(member.completedDate);
+                    logger.info(`AUTO-SYNC: Using member completedDate for lastSigningUrlAccessed for ${recipient.email}`);
+                  }
+                  // Strategy 2: Use recipient signedAt
+                  else if (recipient.signedAt) {
+                    fallbackTimestamp = recipient.signedAt;
+                    logger.info(`AUTO-SYNC: Using signedAt for lastSigningUrlAccessed for ${recipient.email}`);
+                  }
+                  // Strategy 3: Use current time (signing must have happened)
+                  else {
+                    fallbackTimestamp = new Date();
+                    logger.info(`AUTO-SYNC: Using current time for lastSigningUrlAccessed for ${recipient.email}`);
+                  }
+                  
+                  if (fallbackTimestamp) {
+                    recipient.lastSigningUrlAccessed = fallbackTimestamp;
+                    logger.info(`AUTO-SYNC: Set lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
+                    statusesUpdated = true;
+                  }
                 }
                 break;
               case 'WAITING_FOR_OTHERS':
@@ -2498,4 +2549,87 @@ const updateDocumentStatus = (document) => {
     document.status = newStatus;
     logger.info(`Document status updated from ${oldStatus} to ${newStatus}`);
   }
+};
+
+/**
+ * Enhanced function to extract lastSigningUrlAccessed from audit trail
+ */
+const enhanceLastSigningUrlAccessedFromAuditTrail = async (document) => {
+  try {
+    if (!document.adobeAgreementId) {
+      return false;
+    }
+    
+    const { getAgreementAuditTrail } = require('../config/adobeSign');
+    const accessToken = await getAccessToken();
+    const auditTrail = await getAgreementAuditTrail(accessToken, document.adobeAgreementId);
+    
+    if (!auditTrail) {
+      return false;
+    }
+    
+    let auditText = typeof auditTrail === 'string' ? auditTrail : JSON.stringify(auditTrail);
+    let updatedCount = 0;
+    
+    for (const recipient of document.recipients) {
+      if (recipient.lastSigningUrlAccessed) {
+        continue;
+      }
+      
+      const timestamps = extractTimestampsFromAuditTrail(auditText, recipient.email);
+      
+      if (timestamps.length > 0) {
+        const latestTimestamp = new Date(Math.max(...timestamps.map(t => new Date(t).getTime())));
+        recipient.lastSigningUrlAccessed = latestTimestamp;
+        logger.info(`AUDIT-TRAIL: Set lastSigningUrlAccessed for ${recipient.email}: ${latestTimestamp.toISOString()}`);
+        updatedCount++;
+      }
+    }
+    
+    if (updatedCount > 0) {
+      await document.save();
+    }
+    
+    return updatedCount > 0;
+    
+  } catch (error) {
+    logger.error(`Error enhancing lastSigningUrlAccessed from audit trail: ${error.message}`);
+    return false;
+  }
+};
+
+const extractTimestampsFromAuditTrail = (auditText, email) => {
+  const timestamps = [];
+  const patterns = [
+    /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z?)/g,
+    /(\d{1,2}\/\d{1,2}\/\d{4} \d{1,2}:\d{2}:\d{2} [AP]M)/g,
+    /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/g
+  ];
+  
+  const emailIndex = auditText.toLowerCase().indexOf(email.toLowerCase());
+  if (emailIndex === -1) {
+    return timestamps;
+  }
+  
+  const searchStart = Math.max(0, emailIndex - 1000);
+  const searchEnd = Math.min(auditText.length, emailIndex + 1000);
+  const searchText = auditText.substring(searchStart, searchEnd);
+  
+  for (const pattern of patterns) {
+    const matches = searchText.match(pattern);
+    if (matches) {
+      for (const match of matches) {
+        try {
+          const timestamp = new Date(match);
+          if (timestamp.getTime() > 0) {
+            timestamps.push(timestamp.toISOString());
+          }
+        } catch (e) {
+          // Invalid timestamp, skip
+        }
+      }
+    }
+  }
+  
+  return [...new Set(timestamps)];
 };
