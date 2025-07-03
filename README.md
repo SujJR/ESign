@@ -171,21 +171,6 @@ npm run generate-keys
 - `GET /api/documents/:id/download` - Download signed document
 - `POST /api/documents/:id/send-reminder` - Send reminder to unsigned recipients
 
-### Enhanced Document Management
-- `POST /api/enhanced/:id/schedule-reminders` - Schedule automated reminders
-- `GET /api/enhanced/:id/reminder-status` - Check reminder status
-- `DELETE /api/enhanced/:id/reminders` - Cancel scheduled reminders
-- `GET /api/enhanced/reminders` - List all active reminders
-- `POST /api/enhanced/:id/start-monitoring` - Start document monitoring
-- `POST /api/enhanced/:id/stop-monitoring` - Stop document monitoring
-- `GET /api/enhanced/:id/monitoring-status` - Check monitoring status
-- `GET /api/enhanced/monitoring` - List all monitored documents
-- `GET /api/enhanced/:id/analytics` - Get document analytics
-- `POST /api/enhanced/bulk/start-monitoring` - Start bulk monitoring
-- `GET /api/enhanced/system/status` - System status overview
-- `POST /api/enhanced/:id/force-refresh` - Force refresh document status
-- `POST /api/enhanced/:id/test-reminder` - Test reminder functionality
-
 ### Webhooks
 - `POST /api/webhooks/setup` - Setup Adobe Sign webhook
 - `POST /api/webhooks/adobe-sign` - Adobe Sign webhook handler (for Adobe Sign)
