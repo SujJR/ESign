@@ -155,6 +155,10 @@ npm run generate-keys
 
 ## API Endpoints
 
+
+<img width="534" alt="Screenshot 2025-07-03 at 8 18 47 PM" src="https://github.com/user-attachments/assets/f7808b4e-5b39-4c39-b36c-744497ce7c97" />
+
+
 ### Health Check
 - `GET /` - Server health and basic information
 - `GET /api/enhanced/adobe-sign/health` - Adobe Sign integration health check
