@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "E-Signature API - Complete Collection with Enhanced Workflow",
-    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, iframe-compatible signing URLs, and webhook integration.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🚀 UNIFIED ENDPOINT: All document upload, preparation, and sending operations are now combined into ONE powerful endpoint:\n• `/api/documents/upload-and-send` - Supports 3 upload methods in one interface\n• Method 1: File Upload + JSON File (multipart/form-data)\n• Method 2: Document URL + JSON Files (multipart/form-data)\n• Method 3: Document URL + Inline JSON (application/json)\n\n🆕 KEY FEATURES:\n• Single endpoint for complete document workflow\n• Auto-extract recipients from JSON template data\n• Process template variables in DOCX files\n• Real-time Adobe Sign integration\n• Generate and store signing URLs\n• Enhanced error handling and logging\n• Rate limit protection\n• Webhook support for status updates\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM:\nThe API includes reminder functionality for unsigned recipients. Adobe Sign's native reminder API may have limitations, but the system provides both Adobe Sign API reminders and email reminders for reliability.\n\n🔔 WEBHOOK INTEGRATION:\nSupports Adobe Sign webhooks for real-time status updates. Webhooks automatically update signature status and timestamps when documents are signed.",
+    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, iframe-compatible signing URLs, and webhook integration.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🚀 UNIFIED ENDPOINT: All document upload, preparation, and sending operations are now combined into ONE powerful endpoint:\n• `/api/documents/upload-and-send` - Supports 3 upload methods in one interface\n• Method 1: File Upload + JSON File (multipart/form-data)\n• Method 2: Document URL + Inline JSON (application/json)\n\n🆕 KEY FEATURES:\n• Single endpoint for complete document workflow\n• Auto-extract recipients from JSON template data\n• Process template variables in DOCX files\n• Real-time Adobe Sign integration\n• Generate and store signing URLs\n• Enhanced error handling and logging\n• Rate limit protection\n• Webhook support for status updates\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM:\nThe API includes reminder functionality for unsigned recipients. Adobe Sign's native reminder API may have limitations, but the system provides both Adobe Sign API reminders and email reminders for reliability.\n\n🔔 WEBHOOK INTEGRATION:\nSupports Adobe Sign webhooks for real-time status updates. Webhooks automatically update signature status and timestamps when documents are signed.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -33,6 +33,88 @@
     }
   ],
   "item": [
+    {
+      "name": "Health Checks",
+      "description": "🏥 **HEALTH CHECK ENDPOINTS**\n\nMonitor the health and status of your E-Signature API and its integrations.\n\n📋 **Available Health Checks:**\n• Server Health - Basic server information and uptime\n• Adobe Sign Health - Test Adobe Sign API connectivity and configuration\n\n✅ **Key Features:**\n• Real-time status monitoring\n• Integration health verification\n• API connectivity testing\n• System diagnostics\n\n⚠️ **Important:** These endpoints help ensure your system is running properly and can communicate with Adobe Sign services.",
+      "item": [
+        {
+          "name": "Server Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('✅ Server health check successful');",
+                  "    console.log('🚀 Status:', response.status);",
+                  "    console.log('📊 Environment:', response.environment);",
+                  "    console.log('⏱️ Uptime:', response.uptime);",
+                  "    console.log('🕐 Timestamp:', response.timestamp);",
+                  "    if (response.version) {",
+                  "        console.log('🔖 Version:', response.version);",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Server health check failed');",
+                  "    console.log('🔍 Response:', pm.response.text());",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/",
+            "description": "🏥 **Server Health Check**\n\nBasic health check for the E-Signature API server.\n\n✅ **What it checks:**\n• Server is running and responding\n• Basic server information\n• Application uptime\n• Environment details\n\n📋 **Response includes:**\n• Status (healthy/unhealthy)\n• Server uptime\n• Environment (development/production)\n• Current timestamp\n• Version information (if available)\n\n⚠️ **Note:** This endpoint does not require authentication and provides basic server status information."
+          }
+        },
+        {
+          "name": "Adobe Sign Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('✅ Adobe Sign health check successful');",
+                  "    console.log('🔗 Status:', response.status);",
+                  "    console.log('🌐 Base URL:', response.baseUrl);",
+                  "    console.log('🔑 API Key Status:', response.apiKeyStatus);",
+                  "    console.log('📊 Connection Status:', response.connectionStatus);",
+                  "    console.log('⏱️ Response Time:', response.responseTime + 'ms');",
+                  "    console.log('🕐 Timestamp:', response.timestamp);",
+                  "    if (response.userInfo) {",
+                  "        console.log('👤 User Info:', response.userInfo);",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Adobe Sign health check failed');",
+                  "    const response = pm.response.json();",
+                  "    console.log('🔍 Error:', response.message);",
+                  "    if (response.details) {",
+                  "        console.log('📋 Details:', response.details);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/enhanced/adobe-sign/health",
+            "description": "🏥 **Adobe Sign Health Check**\n\nComprehensive health check for Adobe Sign API integration.\n\n✅ **What it checks:**\n• Adobe Sign API connectivity\n• API key validity and permissions\n• Base URL configuration\n• Service response time\n• User account information\n\n📋 **Response includes:**\n• Overall health status\n• Adobe Sign base URL\n• API key validation status\n• Connection test results\n• Response time measurements\n• User account details (if accessible)\n\n⚠️ **Authentication Required:** This endpoint requires a valid API key to test Adobe Sign integration.\n\n🔧 **Troubleshooting:**\n• If this fails, check your Adobe Sign API configuration\n• Verify your API key is valid and has proper permissions\n• Ensure Adobe Sign base URL is correct"
+          }
+        }
+      ]
+    },
     {
       "name": "API Key Management",
       "description": "🔑 **API KEY AUTHENTICATION**\n\nThis system uses API Key authentication exclusively. All endpoints require an API key.\n\n📋 **How to get an API key:**\n1. Run `node generate-api-keys.js` in your project directory\n2. Use the generated API key in the `X-API-Key` header\n3. Set the API key in the collection variable `{{apiKey}}`\n\n✅ **Authentication Methods:**\n• Header: `X-API-Key: your_api_key`\n• Authorization Header: `Authorization: Bearer your_api_key`\n• Query Parameter: `?api_key=your_api_key`\n\n⚠️ **Important:** Keep your API keys secure and never commit them to version control.",
@@ -347,66 +429,6 @@
             },
             "url": "{{baseUrl}}/api/documents/{{documentId}}/send-reminder",
             "description": "📧 **Send Reminder to Unsigned Recipients**\n\n✅ **What this endpoint does:**\n• Identifies recipients who haven't signed yet using enhanced detection\n• Attempts to send reminders via Adobe Sign's API\n• Returns success response with pending recipient details\n• Gracefully handles Adobe Sign API failures\n\n⚠️ **IMPORTANT KNOWN ISSUE:**\nAdobe Sign's reminder API endpoints currently return 404 \"Resource not found\" errors. This is an Adobe Sign API issue, not a problem with your system.\n\n🎯 **RECOMMENDED SOLUTION:**\nFor 100% reliable reminders, use Adobe Sign's web interface:\n1. Go to: https://echosign.adobe.com/\n2. Click \"Manage\" tab\n3. Find documents with \"Out for Signature\" status\n4. Click on document → \"Send Reminder\"\n5. Adobe automatically emails all unsigned recipients\n\n💡 **Why web interface works better:**\n• 100% reliable - no API issues\n• Professional emails from Adobe's verified servers\n• No spam problems - high deliverability\n• Direct signing links included automatically\n• Delivery tracking built-in\n\n🔧 **This endpoint still works correctly for:**\n• Identifying unsigned recipients\n• Logging reminder attempts\n• Tracking reminder history\n• System integration workflows"
-          }
-        },
-        {
-          "name": "Update Recipient Timestamps",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "    const response = pm.response.json();",
-                  "    if (response.data && response.data.updatesApplied) {",
-                  "        console.log('✅ Timestamp update successful - applied', response.data.updatesApplied, 'updates');",
-                  "        response.data.results.forEach(result => {",
-                  "            if (result.success) {",
-                  "                console.log('✅ ' + result.email + ': ' + result.changes);",
-                  "            } else {",
-                  "                console.log('❌ ' + result.email + ': ' + result.error);",
-                  "            }",
-                  "        });",
-                  "        console.log('');",
-                  "        console.log('📅 Updated recipients:');",
-                  "        response.data.currentRecipients.forEach((recipient, index) => {",
-                  "            console.log(`${index + 1}. ${recipient.email}`);",
-                  "            console.log(`   Status: ${recipient.status}`);",
-                  "            console.log(`   SignedAt: ${recipient.signedAt || 'null'}`);",
-                  "            console.log(`   LastAccessed: ${recipient.lastSigningUrlAccessed || 'null'}`);",
-                  "        });",
-                  "    }",
-                  "} else {",
-                  "    console.log('❌ Timestamp update failed:', pm.response.json().message);",
-                  "}"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "API Key for authentication"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"recipientUpdates\": [\n    {\n      \"email\": \"{{recipientEmail}}\",\n      \"status\": \"signed\",\n      \"signedAt\": \"2024-01-15T14:30:00.000Z\",\n      \"lastSigningUrlAccessed\": \"2024-01-15T14:25:00.000Z\"\n    },\n    {\n      \"email\": \"jane.provider@example.com\",\n      \"status\": \"viewed\"\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": "{{baseUrl}}/api/documents/{{documentId}}/update-timestamps",
-            "description": "🕒 **Manually Update Recipient Timestamps**\n\n✅ **What this endpoint does:**\n• Updates signedAt and lastSigningUrlAccessed timestamps for recipients\n• Changes recipient status (pending → viewed → signed)\n• Auto-sets timestamps when status changes (if not provided)\n• Updates overall document status based on recipient changes\n• Provides detailed response showing what was changed\n\n🎯 **When to use this endpoint:**\n• Adobe Sign status sync is not working (integration not configured)\n• Webhook events are not being received\n• Need to manually correct timestamp data\n• Bulk updating recipient statuses and timestamps\n\n📋 **Request Format:**\n• `recipientUpdates`: Array of recipient updates\n• `email`: Recipient email (required)\n• `status`: New status (optional: pending, sent, viewed, signed, declined)\n• `signedAt`: Timestamp when signed (ISO format, optional)\n• `lastSigningUrlAccessed`: Timestamp when accessed (ISO format, optional)\n\n💡 **Auto-timestamp features:**\n• Setting status to 'signed' auto-sets signedAt if not provided\n• Setting status to 'viewed' or 'signed' auto-sets lastSigningUrlAccessed if not provided\n• Timestamps are validated for proper ISO format\n\n🔧 **Response includes:**\n• Number of updates applied\n• Detailed results for each recipient\n• Current state of all recipients after update\n• Error messages for invalid updates\n\n⚠️ **Important:** This endpoint bypasses Adobe Sign and updates the database directly. Use when Adobe Sign integration is not available or when you need to correct data manually."
           }
         }
       ]

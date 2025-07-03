@@ -12,6 +12,109 @@ const logger = require('../utils/logger');
 const { authenticateApiKey } = require('../middleware/apiKeyAuth');
 
 /**
+ * @swagger
+ * /api/enhanced/adobe-sign/health:
+ *   get:
+ *     summary: Check Adobe Sign integration health
+ *     description: Performs a comprehensive health check of the Adobe Sign API integration, including authentication, API accessibility, and service status.
+ *     tags: [Health Check]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Adobe Sign integration is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Adobe Sign integration is healthy"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     isHealthy:
+ *                       type: boolean
+ *                       example: true
+ *                     summary:
+ *                       type: string
+ *                       example: "All Adobe Sign services are operational"
+ *                     timestamp:
+ *                       type: string
+ *                       format: date-time
+ *                     details:
+ *                       type: object
+ *                       properties:
+ *                         authentication:
+ *                           type: string
+ *                           example: "OK"
+ *                         apiAccess:
+ *                           type: string
+ *                           example: "OK"
+ *                         serviceStatus:
+ *                           type: string
+ *                           example: "OK"
+ *       503:
+ *         description: Adobe Sign integration is unhealthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Adobe Sign integration has issues"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     isHealthy:
+ *                       type: boolean
+ *                       example: false
+ *                     summary:
+ *                       type: string
+ *                       example: "Adobe Sign authentication failed"
+ *                     timestamp:
+ *                       type: string
+ *                       format: date-time
+ *                     error:
+ *                       type: string
+ *                       example: "Invalid credentials"
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *     examples:
+ *       healthy:
+ *         summary: Healthy Adobe Sign integration
+ *         value:
+ *           success: true
+ *           message: "Adobe Sign integration is healthy"
+ *           data:
+ *             isHealthy: true
+ *             summary: "All Adobe Sign services are operational"
+ *             timestamp: "2025-01-15T10:00:00.000Z"
+ *             details:
+ *               authentication: "OK"
+ *               apiAccess: "OK"
+ *               serviceStatus: "OK"
+ *       unhealthy:
+ *         summary: Unhealthy Adobe Sign integration
+ *         value:
+ *           success: false
+ *           message: "Adobe Sign integration has issues"
+ *           data:
+ *             isHealthy: false
+ *             summary: "Adobe Sign authentication failed"
+ *             timestamp: "2025-01-15T10:00:00.000Z"
+ *             error: "Invalid credentials or network issue"
+ */
+
+/**
  * Health check endpoint for Adobe Sign integration
  * @route GET /api/documents/adobe-sign/health
  */

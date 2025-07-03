@@ -11,12 +11,13 @@ dotenv.config();
 // Import database connection
 const connectDB = require('./config/db');
 
+// Import Swagger configuration
+const { swaggerServe, swaggerSetup } = require('./config/swagger');
+
 // Import routes
 const documentRoutes = require('./routes/document.routes');
 const enhancedRoutes = require('./routes/enhanced.routes');
-const logRoutes = require('./routes/log.routes');
 const apiKeyRoutes = require('./routes/apiKey.routes');
-const emailRoutes = require('./routes/email.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const testRoutes = require('./routes/test.routes');
 
@@ -93,10 +94,9 @@ app.get('/', (req, res) => {
     endpoints: {
       documents: '/api/documents',
       enhanced: '/api/enhanced', 
-      logs: '/api/logs',
       apiKeys: '/api/auth/api-keys',
-      email: '/api/email',
-      webhooks: '/api/webhooks'
+      webhooks: '/api/webhooks',
+      docs: '/api-docs'
     },
     authInfo: {
       header: 'X-API-Key: your_api_key',
@@ -106,12 +106,13 @@ app.get('/', (req, res) => {
   });
 });
 
+// Swagger documentation
+app.use('/api-docs', swaggerServe, swaggerSetup);
+
 // API routes
 app.use('/api/documents', documentRoutes);
 app.use('/api/enhanced', enhancedRoutes);
-app.use('/api/logs', logRoutes);
 app.use('/api/auth/api-keys', apiKeyRoutes);
-app.use('/api/email', emailRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/test', testRoutes);
 

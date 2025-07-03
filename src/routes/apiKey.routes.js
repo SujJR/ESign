@@ -8,25 +8,12 @@ const router = express.Router();
 router.use(authenticateApiKey);
 router.use(requirePermissions('admin:all'));
 
+// API Key creation endpoint - documentation removed (manual API key authorization)
 // Create new API key
 router.post('/', apiKeyController.createApiKey);
 
+// API Key listing endpoint - documentation removed (manual API key authorization)
 // Get all API keys
 router.get('/', apiKeyController.getApiKeys);
-
-// Get specific API key
-router.get('/:keyId', apiKeyController.getApiKey);
-
-// Update API key
-router.put('/:keyId', apiKeyController.updateApiKey);
-
-// Deactivate API key
-router.delete('/:keyId', apiKeyController.deactivateApiKey);
-
-// Get API key statistics
-router.get('/:keyId/stats', apiKeyController.getApiKeyStats);
-
-// Regenerate API key
-router.post('/:keyId/regenerate', apiKeyController.regenerateApiKey);
 
 module.exports = router;
