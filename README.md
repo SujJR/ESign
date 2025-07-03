@@ -155,34 +155,197 @@ npm run generate-keys
 
 ## API Endpoints
 
-### Authentication
-- `POST /api/auth/register` - Register new user
-- `POST /api/auth/login` - User login
-- `GET /api/auth/profile` - Get user profile
+### Health Check
+- `GET /` - Server health and basic information
+- `GET /api/enhanced/adobe-sign/health` - Adobe Sign integration health check
+
+### Authentication & API Keys
+- `POST /api/auth/api-keys` - Create new API key (requires admin key)
+- `GET /api/auth/api-keys` - List all API keys (admin only)
 
 ### Documents
-- `POST /api/documents/upload-and-send` - Upload document
+- `POST /api/documents/upload-and-send` - Upload and send document for signature (unified endpoint)
 - `GET /api/documents` - List user documents
 - `GET /api/documents/:id` - Get document details
 - `GET /api/documents/:id/status` - Check signature status
 - `GET /api/documents/:id/download` - Download signed document
+- `POST /api/documents/:id/send-reminder` - Send reminder to unsigned recipients
+
+### Enhanced Document Management
+- `POST /api/enhanced/:id/schedule-reminders` - Schedule automated reminders
+- `GET /api/enhanced/:id/reminder-status` - Check reminder status
+- `DELETE /api/enhanced/:id/reminders` - Cancel scheduled reminders
+- `GET /api/enhanced/reminders` - List all active reminders
+- `POST /api/enhanced/:id/start-monitoring` - Start document monitoring
+- `POST /api/enhanced/:id/stop-monitoring` - Stop document monitoring
+- `GET /api/enhanced/:id/monitoring-status` - Check monitoring status
+- `GET /api/enhanced/monitoring` - List all monitored documents
+- `GET /api/enhanced/:id/analytics` - Get document analytics
+- `POST /api/enhanced/bulk/start-monitoring` - Start bulk monitoring
+- `GET /api/enhanced/system/status` - System status overview
+- `POST /api/enhanced/:id/force-refresh` - Force refresh document status
+- `POST /api/enhanced/:id/test-reminder` - Test reminder functionality
 
 ### Webhooks
-- `POST /api/webhooks/adobe-sign` - Adobe Sign status updates
+- `POST /api/webhooks/setup` - Setup Adobe Sign webhook
+- `POST /api/webhooks/adobe-sign` - Adobe Sign webhook handler (for Adobe Sign)
+
+### Logs
+- `GET /api/logs` - Get system logs (admin only)
+- `GET /api/logs/summary` - Get logs summary (admin only)
+
+### API Documentation
+- `GET /api-docs` - Swagger API documentation
+
+## Authentication
+
+This API uses **API Key authentication exclusively**. Include your API key in requests using one of these methods:
+
+### Header (Recommended)
+```bash
+X-API-Key: your_api_key
+```
+
+### Authorization Header
+```bash
+Authorization: Bearer your_api_key
+```
+
+### Query Parameter
+```bash
+?api_key=your_api_key
+```
+
+### Getting an API Key
+
+1. **Generate Initial API Key**
+   ```bash
+   node generate-api-keys.js
+   ```
+
+2. **Create Additional API Keys** (requires admin key)
+   ```bash
+   curl -X POST http://localhost:3000/api/auth/api-keys \
+     -H "X-API-Key: your_admin_key" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "My Application Key",
+       "description": "API key for document management",
+       "permissions": ["documents:read", "documents:write", "documents:send"]
+     }'
+   ```
+
+### API Key Permissions
+
+- `documents:read` - View documents and their status
+- `documents:write` - Upload and modify documents
+- `documents:send` - Send documents for signature
+- `logs:read` - View system logs
+- `admin:all` - Full administrative access
 
 ## Usage Workflow
 
-1. **Register/Login**: Create account or authenticate
-2. **Upload Document**: Upload PDF or DOCX file
-3. **Configure Recipients**: Add signer email addresses
-4. **Send for Signature**: Submit to Adobe Sign
-5. **Track Progress**: Monitor signature status
-6. **Download Completed**: Get signed document
+### 1. Setup and Authentication
+```bash
+# Generate your first API key
+node generate-api-keys.js
+
+# Test server health
+curl http://localhost:3000/
+
+# Test Adobe Sign integration
+curl -H "X-API-Key: your_api_key" http://localhost:3000/api/enhanced/adobe-sign/health
+```
+
+### 2. Upload and Send Document
+```bash
+# Method 1: File Upload + JSON File (multipart/form-data)
+curl -X POST http://localhost:3000/api/documents/upload-and-send \
+  -H "X-API-Key: your_api_key" \
+  -F "document=@/path/to/document.pdf" \
+  -F "data=@/path/to/template-data.json"
+
+# Method 2: Document URL + Inline JSON (application/json)
+curl -X POST http://localhost:3000/api/documents/upload-and-send \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "documentUrl": "https://example.com/document.pdf",
+    "jsonData": {
+      "recipients": [
+        {"name": "John Doe", "email": "john@example.com", "title": "Client"}
+      ],
+      "templateVariable": "value"
+    }
+  }'
+```
+
+### 3. Track Document Status
+```bash
+# Check document status
+curl -H "X-API-Key: your_api_key" \
+  http://localhost:3000/api/documents/DOCUMENT_ID/status
+
+# Get all documents
+curl -H "X-API-Key: your_api_key" \
+  http://localhost:3000/api/documents
+```
+
+### 4. Send Reminders
+```bash
+# Send reminder to unsigned recipients
+curl -X POST http://localhost:3000/api/documents/DOCUMENT_ID/send-reminder \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Please sign this document."}'
+```
+
+### 5. Download Signed Document
+```bash
+# Download completed document
+curl -H "X-API-Key: your_api_key" \
+  http://localhost:3000/api/documents/DOCUMENT_ID/download \
+  -o signed-document.pdf
+```
+
+### 6. Setup Webhooks (Optional)
+```bash
+# Configure Adobe Sign webhooks for real-time updates
+curl -X POST http://localhost:3000/api/webhooks/setup \
+  -H "X-API-Key: your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"webhookUrl": "https://your-domain.com/api/webhooks/adobe-sign"}'
+```
+
+## Testing with Postman
+
+1. **Import Collection**: Import `final-postman-collection.json` into Postman
+2. **Set Variables**: Configure `baseUrl` and `apiKey` in collection variables
+3. **Run Health Checks**: Test both server and Adobe Sign health endpoints
+4. **Upload Document**: Use the unified upload endpoint with your preferred method
+5. **Monitor Progress**: Check status and send reminders as needed
+
+## Key Features
+
+### Unified Upload Endpoint
+The `/api/documents/upload-and-send` endpoint supports multiple upload methods:
+- **File Upload**: Traditional file upload with form data
+- **URL Download**: Download documents from URLs (Google Docs, etc.)
+- **Template Processing**: Automatic DOCX template variable replacement
+- **Multi-recipient Support**: Sequential or parallel signing workflows
+
+### Enhanced Monitoring
+- **Real-time Status**: Automatic document status updates
+- **Reminder System**: Automated and manual reminder capabilities
+- **Analytics**: Document interaction tracking and analytics
+- **Bulk Operations**: Handle multiple documents simultaneously
+
+### Integration Features
+- **Adobe Sign API**: Full integration with Adobe Sign services
+- **Webhook Support**: Real-time event notifications
+- **Template Processing**: Dynamic document generation
+- **Multi-format Support**: PDF, DOCX, DOC file handling
 
 ## Support
 
 For support and questions, please refer to the Adobe Sign API documentation or create an issue in this repository.
-
-## License
-
-This project is licensed under the ISC License.
