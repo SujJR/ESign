@@ -114,19 +114,19 @@ const options = {
             }
           }
         }
-      }
-    },
-    responses: {
-      UnauthorizedError: {
-        description: 'API key is missing or invalid',
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                success: { type: 'boolean', example: false },
-                message: { type: 'string', example: 'Unauthorized - Invalid or missing API key' },
-                statusCode: { type: 'number', example: 401 }
+      },
+      responses: {
+        UnauthorizedError: {
+          description: 'API key is missing or invalid',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean', example: false },
+                  message: { type: 'string', example: 'Unauthorized - Invalid or missing API key' },
+                  statusCode: { type: 'number', example: 401 }
+                }
               }
             }
           }
