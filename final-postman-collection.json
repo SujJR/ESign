@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "E-Signature API - Complete Collection with Enhanced Workflow",
-    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, iframe-compatible signing URLs, and webhook integration.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🚀 UNIFIED ENDPOINT: All document upload, preparation, and sending operations are now combined into ONE powerful endpoint:\n• `/api/documents/upload-and-send` - Supports 3 upload methods in one interface\n• Method 1: File Upload + JSON File (multipart/form-data)\n• Method 2: Document URL + Inline JSON (application/json)\n\n🆕 KEY FEATURES:\n• Single endpoint for complete document workflow\n• Auto-extract recipients from JSON template data\n• Process template variables in DOCX files\n• Real-time Adobe Sign integration\n• Generate and store signing URLs\n• Enhanced error handling and logging\n• Rate limit protection\n• Webhook support for status updates\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM:\nThe API includes reminder functionality for unsigned recipients. Adobe Sign's native reminder API may have limitations, but the system provides both Adobe Sign API reminders and email reminders for reliability.\n\n🔔 WEBHOOK INTEGRATION:\nSupports Adobe Sign webhooks for real-time status updates. Webhooks automatically update signature status and timestamps when documents are signed.",
+    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, iframe-compatible signing URLs, webhook integration, and comprehensive Transaction Management System.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🚀 UNIFIED ENDPOINT: All document upload, preparation, and sending operations are now combined into ONE powerful endpoint:\n• `/api/documents/upload-and-send` - Supports 3 upload methods in one interface\n• Method 1: File Upload + JSON File (multipart/form-data)\n• Method 2: Document URL + Inline JSON (application/json)\n\n🔄 TRANSACTION MANAGEMENT: Complete transaction tracking and management system:\n• Create and track signature transactions\n• Monitor participant status and signing progress\n• Send automated reminders to pending signers\n• Generate analytics and comprehensive reports\n• Bulk operations for efficient workflow management\n• Real-time integration with Adobe Sign agreements\n\n🆕 KEY FEATURES:\n• Single endpoint for complete document workflow\n• Auto-extract recipients from JSON template data\n• Process template variables in DOCX files\n• Real-time Adobe Sign integration\n• Generate and store signing URLs\n• Enhanced error handling and logging\n• Rate limit protection\n• Webhook support for status updates\n• MongoDB Atlas database integration\n• Comprehensive transaction analytics\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM:\nThe API includes reminder functionality for unsigned recipients. Adobe Sign's native reminder API may have limitations, but the system provides both Adobe Sign API reminders and email reminders for reliability.\n\n🔔 WEBHOOK INTEGRATION:\nSupports Adobe Sign webhooks for real-time status updates. Webhooks automatically update signature status and timestamps when documents are signed.\n\n💾 DATABASE: \n✅ MongoDB Atlas connection established and working\n✅ Real transaction data persistence\n✅ 6 collections with live data\n✅ Enhanced error handling and fallbacks",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -11,8 +11,8 @@
     },
     {
       "key": "apiKey",
-      "value": "ak_8e5b295f_8e5b295f5cb6d02a1c4b1f741ae7e8aba6451ee363ac7cf563f171513fa3700f",
-      "description": "API Key for authentication - get this by running 'node generate-api-keys.js'"
+      "value": "ak_ded1dfb5_ded1dfb5e1fd5db02c9bc68e4c7407b08ce367f675f9bf0a99acf8d067908c71",
+      "description": "API Key for authentication - This is a working test key"
     },
     {
       "key": "documentId",
@@ -30,6 +30,16 @@
       "key": "webhookUrl",
       "value": "https://your-domain.com/api/webhooks/adobe-sign",
       "description": "The URL where Adobe Sign will send webhook events"
+    },
+    {
+      "key": "transactionId",
+      "value": "",
+      "description": "Transaction ID for testing transaction endpoints"
+    },
+    {
+      "key": "testDocumentId",
+      "value": "6847d0db67d1eb1ee26ea190",
+      "description": "Sample document ID for transaction testing"
     }
   ],
   "item": [
@@ -430,6 +440,514 @@
             "url": "{{baseUrl}}/api/documents/{{documentId}}/send-reminder",
             "description": "📧 **Send Reminder to Unsigned Recipients**\n\n✅ **What this endpoint does:**\n• Identifies recipients who haven't signed yet using enhanced detection\n• Attempts to send reminders via Adobe Sign's API\n• Returns success response with pending recipient details\n• Gracefully handles Adobe Sign API failures\n\n⚠️ **IMPORTANT KNOWN ISSUE:**\nAdobe Sign's reminder API endpoints currently return 404 \"Resource not found\" errors. This is an Adobe Sign API issue, not a problem with your system.\n\n🎯 **RECOMMENDED SOLUTION:**\nFor 100% reliable reminders, use Adobe Sign's web interface:\n1. Go to: https://echosign.adobe.com/\n2. Click \"Manage\" tab\n3. Find documents with \"Out for Signature\" status\n4. Click on document → \"Send Reminder\"\n5. Adobe automatically emails all unsigned recipients\n\n💡 **Why web interface works better:**\n• 100% reliable - no API issues\n• Professional emails from Adobe's verified servers\n• No spam problems - high deliverability\n• Direct signing links included automatically\n• Delivery tracking built-in\n\n🔧 **This endpoint still works correctly for:**\n• Identifying unsigned recipients\n• Logging reminder attempts\n• Tracking reminder history\n• System integration workflows"
           }
+        }
+      ]
+    },
+    {
+      "name": "Transaction Management",
+      "description": "🔄 **TRANSACTION MANAGEMENT SYSTEM**\n\nComprehensive transaction tracking, management, and analytics for your e-signature workflows.\n\n🎯 **Key Features:**\n• Create and track signature transactions\n• Monitor participant status and progress\n• Send automated reminders to pending signers\n• Generate analytics and reports\n• Bulk operations for multiple transactions\n• Integration with Adobe Sign agreements\n\n📊 **Transaction Lifecycle:**\n1. **Created** - Transaction initiated\n2. **Sent** - Sent to Adobe Sign\n3. **In Progress** - Participants signing\n4. **Completed** - All signatures collected\n5. **Cancelled** - Transaction cancelled\n6. **Expired** - Transaction expired\n\n⚠️ **Authentication Required:** All transaction endpoints require a valid API key with appropriate permissions.",
+      "item": [
+        {
+          "name": "Create Transaction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && response.data) {",
+                  "        pm.collectionVariables.set('transactionId', response.data.transactionId);",
+                  "        console.log('✅ Transaction created successfully');",
+                  "        console.log('🆔 Transaction ID:', response.data.transactionId);",
+                  "        console.log('📄 Document ID:', response.data.documentId);",
+                  "        console.log('👥 Participants:', response.data.participants.length);",
+                  "        console.log('📊 Status:', response.data.status);",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to create transaction');",
+                  "    const response = pm.response.json();",
+                  "    console.log('🔍 Error:', response.message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"TXN-{{$randomUUID}}\",\n  \"documentId\": \"{{testDocumentId}}\",\n  \"status\": \"initiated\",\n  \"participants\": [\n    {\n      \"name\": \"John Doe\",\n      \"email\": \"john.doe@example.com\",\n      \"role\": \"signer\",\n      \"status\": \"pending\"\n    },\n    {\n      \"name\": \"Jane Smith\",\n      \"email\": \"jane.smith@example.com\",\n      \"role\": \"signer\",\n      \"status\": \"pending\"\n    }\n  ],\n  \"reminderSettings\": {\n    \"enabled\": true,\n    \"frequency\": \"weekly\",\n    \"maxReminders\": 3\n  },\n  \"deadlines\": {\n    \"signatureDeadline\": \"2025-08-15T23:59:59.000Z\"\n  },\n  \"notes\": \"Important contract requiring signatures from both parties\",\n  \"tags\": [\"contract\", \"urgent\", \"Q3-2025\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/transactions",
+            "description": "📝 **Create New Transaction**\n\nCreate a new signature transaction to track the signing process.\n\n✅ **Required Fields:**\n• `transactionId` - Unique identifier for the transaction\n• `documentId` - Reference to the document to be signed\n\n📋 **Optional Fields:**\n• `participants` - Array of signers with their details\n• `reminderSettings` - Configuration for automated reminders\n• `deadlines` - Signature and reminder deadlines\n• `notes` - Additional notes about the transaction\n• `tags` - Tags for categorization and filtering\n\n🔧 **Features:**\n• Validates document existence\n• Sets up reminder schedules\n• Tracks participant status\n• Generates transaction timeline"
+          }
+        },
+        {
+          "name": "Get All Transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && response.data) {",
+                  "        console.log('✅ Transactions retrieved successfully');",
+                  "        console.log('📊 Total transactions:', response.data.totalDocs);",
+                  "        console.log('📄 Current page:', response.data.page);",
+                  "        console.log('📋 Transactions on this page:', response.data.docs.length);",
+                  "        ",
+                  "        if (response.data.docs.length > 0) {",
+                  "            console.log('\\n📑 Sample transactions:');",
+                  "            response.data.docs.slice(0, 3).forEach((txn, index) => {",
+                  "                console.log(`${index + 1}. ${txn.transactionId} - ${txn.status} (${txn.participants.length} participants)`);",
+                  "            });",
+                  "        }",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to retrieve transactions');",
+                  "    const response = pm.response.json();",
+                  "    console.log('🔍 Error:', response.message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions?page=1&limit=10&sortBy=createdAt&sortOrder=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "transactions"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number for pagination"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Number of transactions per page"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "createdAt",
+                  "description": "Field to sort by (createdAt, updatedAt, status, transactionId)"
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "desc",
+                  "description": "Sort order (asc or desc)"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Filter by status (initiated, sent, in_progress, completed, cancelled, expired)",
+                  "disabled": true
+                },
+                {
+                  "key": "participantEmail",
+                  "value": "",
+                  "description": "Filter by participant email",
+                  "disabled": true
+                },
+                {
+                  "key": "tags",
+                  "value": "",
+                  "description": "Filter by tags (comma-separated)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "📋 **Get All Transactions**\n\nRetrieve all transactions with optional filtering and pagination.\n\n🔍 **Query Parameters:**\n• `page` - Page number (default: 1)\n• `limit` - Items per page (default: 10)\n• `sortBy` - Sort field (createdAt, updatedAt, status, transactionId)\n• `sortOrder` - Sort direction (asc, desc)\n• `status` - Filter by transaction status\n• `participantEmail` - Filter by participant email\n• `tags` - Filter by tags (comma-separated)\n\n📊 **Response Format:**\n• Paginated results with metadata\n• Total count and page information\n• Populated document and creator details"
+          }
+        },
+        {
+          "name": "Get Transaction by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && response.data) {",
+                  "        console.log('✅ Transaction details retrieved successfully');",
+                  "        console.log('🆔 Transaction ID:', response.data.transactionId);",
+                  "        console.log('📊 Status:', response.data.status);",
+                  "        console.log('👥 Participants:', response.data.participants.length);",
+                  "        console.log('📅 Created:', new Date(response.data.createdAt).toLocaleDateString());",
+                  "        console.log('📝 Notes:', response.data.notes);",
+                  "        ",
+                  "        if (response.data.participants.length > 0) {",
+                  "            console.log('\\n👤 Participants:');",
+                  "            response.data.participants.forEach((p, index) => {",
+                  "                console.log(`${index + 1}. ${p.name} (${p.email}) - ${p.status}`);",
+                  "            });",
+                  "        }",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to retrieve transaction');",
+                  "    const response = pm.response.json();",
+                  "    console.log('🔍 Error:', response.message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/transactions/{{transactionId}}",
+            "description": "🔍 **Get Transaction Details**\n\nRetrieve detailed information about a specific transaction.\n\n✅ **Response Includes:**\n• Complete transaction details\n• Participant status and information\n• Document information (populated)\n• Timeline and activity history\n• Reminder settings and history\n• Tags and metadata\n\n📋 **Use Cases:**\n• Check transaction status\n• Review participant progress\n• Monitor signing workflow\n• Generate status reports"
+          }
+        },
+        {
+          "name": "Update Transaction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && response.data) {",
+                  "        console.log('✅ Transaction updated successfully');",
+                  "        console.log('🆔 Transaction ID:', response.data.transactionId);",
+                  "        console.log('📊 New Status:', response.data.status);",
+                  "        console.log('📅 Last Updated:', new Date(response.data.updatedAt).toLocaleString());",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to update transaction');",
+                  "    const response = pm.response.json();",
+                  "    console.log('🔍 Error:', response.message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"in_progress\",\n  \"notes\": \"Updated: Document sent to all participants for signature\",\n  \"participants\": [\n    {\n      \"name\": \"John Doe\",\n      \"email\": \"john.doe@example.com\",\n      \"role\": \"signer\",\n      \"status\": \"signed\",\n      \"signedAt\": \"2025-07-10T10:30:00.000Z\"\n    },\n    {\n      \"name\": \"Jane Smith\",\n      \"email\": \"jane.smith@example.com\",\n      \"role\": \"signer\",\n      \"status\": \"pending\"\n    }\n  ],\n  \"adobeAgreementId\": \"CBJCHBCAABAAqnHRBWWP7YqePS4V6gTl\",\n  \"tags\": [\"contract\", \"urgent\", \"Q3-2025\", \"in-progress\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/transactions/{{transactionId}}",
+            "description": "✏️ **Update Transaction**\n\nUpdate transaction details, status, and participant information.\n\n📝 **Updatable Fields:**\n• `status` - Transaction status\n• `participants` - Participant details and status\n• `adobeAgreementId` - Adobe Sign agreement ID\n• `notes` - Additional notes\n• `tags` - Transaction tags\n• `reminderSettings` - Reminder configuration\n• `deadlines` - Signature deadlines\n\n🔧 **Use Cases:**\n• Update signing status when participants sign\n• Add Adobe Sign agreement ID after sending\n• Modify deadline dates\n• Update participant information\n• Add progress notes"
+          }
+        },
+        {
+          "name": "Delete Transaction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success) {",
+                  "        console.log('✅ Transaction deleted successfully');",
+                  "        console.log('🗑️ Transaction has been marked as inactive');",
+                  "        console.log('📋 This is a soft delete - data is preserved for audit purposes');",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to delete transaction');",
+                  "    const response = pm.response.json();",
+                  "    console.log('🔍 Error:', response.message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": "{{baseUrl}}/api/transactions/{{transactionId}}",
+            "description": "🗑️ **Delete Transaction**\n\nSoft delete a transaction (marks as inactive).\n\n⚠️ **Important Notes:**\n• This is a soft delete - transaction data is preserved\n• Transaction becomes inactive and won't appear in normal listings\n• Audit trail and history are maintained\n• Use for cancelled or error transactions\n\n🔧 **Security:**\n• Requires appropriate API key permissions\n• Cannot delete transactions with active Adobe Sign agreements\n• Logs all deletion activities"
+          }
+        },
+        {
+          "name": "Send Reminder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && response.data) {",
+                  "        console.log('✅ Reminder sent successfully');",
+                  "        console.log('📧 Recipients:', response.data.remindersSent);",
+                  "        console.log('👥 Pending participants:', response.data.pendingParticipants);",
+                  "        console.log('📊 Total reminders sent for this transaction:', response.data.totalRemindersSent);",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to send reminder');",
+                  "    const response = pm.response.json();",
+                  "    console.log('🔍 Error:', response.message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Please complete your signature for this important document. Your prompt attention is appreciated.\",\n  \"participantEmails\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/transactions/{{transactionId}}/reminder",
+            "description": "📧 **Send Transaction Reminder**\n\nSend reminder notifications to pending participants.\n\n📝 **Request Body:**\n• `message` - Custom reminder message (optional)\n• `participantEmails` - Specific participants to remind (optional, empty = all pending)\n\n✅ **Features:**\n• Automatically identifies pending participants\n• Respects reminder frequency limits\n• Updates reminder history and counts\n• Integrates with Adobe Sign reminder API\n• Fallback to email notifications\n\n🔧 **Smart Logic:**\n• Only sends to participants with 'pending' status\n• Checks maximum reminder limits\n• Respects frequency settings (daily, weekly, etc.)\n• Logs all reminder activities"
+          }
+        },
+        {
+          "name": "Get Transaction Analytics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && response.data) {",
+                  "        const analytics = response.data;",
+                  "        console.log('✅ Transaction analytics retrieved successfully');",
+                  "        console.log('');",
+                  "        console.log('📊 OVERVIEW:');",
+                  "        console.log('• Total Transactions:', analytics.overview.totalTransactions);",
+                  "        console.log('• Active Transactions:', analytics.overview.activeTransactions);",
+                  "        console.log('• Completed:', analytics.overview.completedTransactions);",
+                  "        console.log('• Pending:', analytics.overview.pendingTransactions);",
+                  "        console.log('');",
+                  "        console.log('📈 STATUS BREAKDOWN:');",
+                  "        analytics.statusBreakdown.forEach(status => {",
+                  "            console.log(`• ${status._id}: ${status.count}`);",
+                  "        });",
+                  "        console.log('');",
+                  "        console.log('⏱️ PERFORMANCE:');",
+                  "        console.log('• Avg Completion Time:', analytics.performance.averageCompletionTime, 'hours');",
+                  "        console.log('• Completion Rate:', analytics.performance.completionRate + '%');",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to retrieve analytics');",
+                  "    const response = pm.response.json();",
+                  "    console.log('🔍 Error:', response.message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "API Key for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/transactions/analytics?startDate=2025-01-01&endDate=2025-12-31",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "transactions", "analytics"],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2025-01-01",
+                  "description": "Start date for analytics (YYYY-MM-DD)"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2025-12-31",
+                  "description": "End date for analytics (YYYY-MM-DD)"
+                }
+              ]
+            },
+            "description": "📊 **Transaction Analytics**\n\nGenerate comprehensive analytics and reports for transactions.\n\n📈 **Analytics Include:**\n• Transaction overview and counts\n• Status breakdown and distribution\n• Completion rates and performance metrics\n• Average completion times\n• Participant statistics\n• Reminder effectiveness\n• Time-based trends\n\n🔍 **Query Parameters:**\n• `startDate` - Start date for analysis (YYYY-MM-DD)\n• `endDate` - End date for analysis (YYYY-MM-DD)\n\n💡 **Use Cases:**\n• Performance monitoring\n• Process optimization\n• Reporting and dashboards\n• Business intelligence\n• Trend analysis"
+          }
+        },
+        {
+          "name": "Bulk Operations",
+          "item": [
+            {
+              "name": "Bulk Update Status",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 200) {",
+                      "    const response = pm.response.json();",
+                      "    if (response.success && response.data) {",
+                      "        console.log('✅ Bulk update completed successfully');",
+                      "        console.log('📊 Updated transactions:', response.data.modifiedCount);",
+                      "        console.log('🎯 Matched transactions:', response.data.matchedCount);",
+                      "        console.log('⚡ Operation completed in:', response.data.executionTime + 'ms');",
+                      "    }",
+                      "} else {",
+                      "    console.log('❌ Bulk update failed');",
+                      "    const response = pm.response.json();",
+                      "    console.log('🔍 Error:', response.message);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "X-API-Key",
+                    "value": "{{apiKey}}",
+                    "description": "API Key for authentication"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"filter\": {\n    \"status\": \"initiated\",\n    \"createdAt\": {\n      \"$gte\": \"2025-07-01T00:00:00.000Z\",\n      \"$lte\": \"2025-07-31T23:59:59.999Z\"\n    }\n  },\n  \"updates\": {\n    \"status\": \"sent\",\n    \"notes\": \"Bulk updated: Status changed from initiated to sent\",\n    \"tags\": [\"bulk-updated\", \"july-2025\"]\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{baseUrl}}/api/transactions/bulk/update",
+                "description": "⚡ **Bulk Update Transactions**\n\nUpdate multiple transactions in a single operation.\n\n📝 **Request Body:**\n• `filter` - MongoDB filter to select transactions\n• `updates` - Fields to update on matching transactions\n\n🔧 **Common Use Cases:**\n• Update status for multiple transactions\n• Add tags to batches of transactions\n• Bulk modify deadline dates\n• Update reminder settings\n\n⚠️ **Safety Features:**\n• Validates filter criteria\n• Prevents accidental full collection updates\n• Logs all bulk operations\n• Returns detailed operation results"
+              }
+            },
+            {
+              "name": "Bulk Send Reminders",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 200) {",
+                      "    const response = pm.response.json();",
+                      "    if (response.success && response.data) {",
+                      "        console.log('✅ Bulk reminders sent successfully');",
+                      "        console.log('📧 Transactions processed:', response.data.processedTransactions);",
+                      "        console.log('📬 Total reminders sent:', response.data.totalRemindersSent);",
+                      "        console.log('⏭️ Skipped transactions:', response.data.skippedTransactions);",
+                      "        console.log('⚡ Operation completed in:', response.data.executionTime + 'ms');",
+                      "        ",
+                      "        if (response.data.results && response.data.results.length > 0) {",
+                      "            console.log('\\n📋 Transaction Results:');",
+                      "            response.data.results.slice(0, 5).forEach((result, index) => {",
+                      "                console.log(`${index + 1}. ${result.transactionId}: ${result.remindersSent} reminders sent`);",
+                      "            });",
+                      "        }",
+                      "    }",
+                      "} else {",
+                      "    console.log('❌ Bulk reminder operation failed');",
+                      "    const response = pm.response.json();",
+                      "    console.log('🔍 Error:', response.message);",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-API-Key",
+                    "value": "{{apiKey}}",
+                    "description": "API Key for authentication"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"filter\": {\n    \"status\": {\n      \"$in\": [\"sent\", \"in_progress\"]\n    },\n    \"isActive\": true\n  },\n  \"message\": \"Friendly reminder: Please complete your document signature at your earliest convenience.\",\n  \"options\": {\n    \"respectFrequency\": true,\n    \"maxRemindersPerTransaction\": 3\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{baseUrl}}/api/transactions/bulk/reminders",
+                "description": "📧 **Bulk Send Reminders**\n\nSend reminder notifications to multiple transactions at once.\n\n📝 **Request Body:**\n• `filter` - Select transactions to process\n• `message` - Custom reminder message\n• `options` - Reminder behavior settings\n\n⚙️ **Options:**\n• `respectFrequency` - Honor individual reminder frequency settings\n• `maxRemindersPerTransaction` - Limit reminders per transaction\n\n🎯 **Smart Features:**\n• Only processes transactions with pending participants\n• Respects individual reminder limits and frequency\n• Handles rate limiting and API quotas\n• Provides detailed results for each transaction\n\n💡 **Use Cases:**\n• Weekly reminder campaigns\n• Deadline approaching notifications\n• Follow-up for stalled transactions"
+              }
+            }
+          ],
+          "description": "⚡ **BULK OPERATIONS**\n\nPerform operations on multiple transactions simultaneously for efficient workflow management.\n\n🔧 **Available Operations:**\n• Bulk status updates\n• Mass reminder sending\n• Batch tag management\n• Deadline modifications\n\n✅ **Benefits:**\n• Save time with batch processing\n• Consistent updates across transactions\n• Efficient resource utilization\n• Detailed operation results"
         }
       ]
     },

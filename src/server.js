@@ -20,6 +20,7 @@ const enhancedRoutes = require('./routes/enhanced.routes');
 const apiKeyRoutes = require('./routes/apiKey.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const testRoutes = require('./routes/test.routes');
+const transactionRoutes = require('./routes/transaction.routes'); // Use real routes
 
 // Import middleware
 const errorMiddleware = require('./middleware/error');
@@ -96,6 +97,7 @@ app.get('/', (req, res) => {
       enhanced: '/api/enhanced', 
       apiKeys: '/api/auth/api-keys',
       webhooks: '/api/webhooks',
+      transactions: '/api/transactions',
       docs: '/api-docs'
     },
     authInfo: {
@@ -114,6 +116,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/enhanced', enhancedRoutes);
 app.use('/api/auth/api-keys', apiKeyRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/transactions', transactionRoutes);
 app.use('/api/test', testRoutes);
 
 // Handle 404 errors - use a regular path instead of wildcard
