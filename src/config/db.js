@@ -12,7 +12,6 @@ const connectDB = async () => {
     process.env.MONGODB_URI,
     process.env.MONGODB_URI?.replace('mongodb+srv://', 'mongodb://'),
     // Direct IP fallback (you can add your cluster IPs here)
-    // 'mongodb://sjr290904:290904sept@cluster0-shard-00-00.a87nnrd.mongodb.net:27017,cluster0-shard-00-01.a87nnrd.mongodb.net:27017,cluster0-shard-00-02.a87nnrd.mongodb.net:27017/esign?ssl=true&replicaSet=atlas-123abc-shard-0&authSource=admin&retryWrites=true&w=majority'
   ].filter(Boolean);
 
   const testDNSResolution = async (hostname) => {
