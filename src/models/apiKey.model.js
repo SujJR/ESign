@@ -25,6 +25,17 @@ const apiKeySchema = new mongoose.Schema(
       required: true,
       length: 8
     },
+    organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: true,
+      index: true
+    },
+    environment: {
+      type: String,
+      enum: ['development', 'staging', 'production'],
+      default: 'production'
+    },
     isActive: {
       type: Boolean,
       default: true
@@ -36,8 +47,23 @@ const apiKeySchema = new mongoose.Schema(
         'documents:write',
         'documents:delete',
         'documents:send',
+        'documents:status',
+        'documents:download',
+        'webhooks:receive',
         'logs:read',
+        'analytics:read',
         'admin:all'
+      ]
+    }],
+    scopes: [{
+      type: String,
+      enum: [
+        'document_management',
+        'signature_workflow',
+        'webhook_notifications',
+        'reporting',
+        'user_management',
+        'full_access'
       ]
     }],
     lastUsed: {
@@ -56,6 +82,10 @@ const apiKeySchema = new mongoose.Schema(
       requestsPerHour: {
         type: Number,
         default: 1000
+      },
+      requestsPerDay: {
+        type: Number,
+        default: 10000
       }
     },
     allowedIPs: [{
@@ -66,6 +96,16 @@ const apiKeySchema = new mongoose.Schema(
           return v === '' || /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(v);
         },
         message: 'Invalid IP address format'
+      }
+    }],
+    allowedDomains: [{
+      type: String,
+      validate: {
+        validator: function(v) {
+          // Allow empty array or valid domain names
+          return v === '' || /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$/.test(v);
+        },
+        message: 'Invalid domain format'
       }
     }],
     expiresAt: {
@@ -89,15 +129,18 @@ const apiKeySchema = new mongoose.Schema(
 
 // Index for efficient queries
 apiKeySchema.index({ keyId: 1, isActive: 1 });
+apiKeySchema.index({ organization: 1, isActive: 1 });
+apiKeySchema.index({ environment: 1 });
 apiKeySchema.index({ expiresAt: 1 });
 apiKeySchema.index({ lastUsed: 1 });
 
 // Static method to generate a new API key
-apiKeySchema.statics.generateApiKey = function() {
+apiKeySchema.statics.generateApiKey = function(organizationSlug = 'default') {
   // Generate a random API key
   const apiKey = crypto.randomBytes(32).toString('hex');
   const prefix = apiKey.substring(0, 8);
-  const keyId = `ak_${prefix}`;
+  // Include organization slug in keyId for better identification
+  const keyId = `ak_${organizationSlug}_${prefix}`;
   
   return {
     apiKey: `${keyId}_${apiKey}`,
@@ -125,6 +168,16 @@ apiKeySchema.methods.isValid = function() {
 // Method to check permissions
 apiKeySchema.methods.hasPermission = function(permission) {
   return this.permissions.includes(permission) || this.permissions.includes('admin:all');
+};
+
+// Method to check scopes
+apiKeySchema.methods.hasScope = function(scope) {
+  return this.scopes.includes(scope) || this.scopes.includes('full_access');
+};
+
+// Method to check if key belongs to organization
+apiKeySchema.methods.belongsToOrganization = function(organizationId) {
+  return this.organization.toString() === organizationId.toString();
 };
 
 // Method to update usage statistics

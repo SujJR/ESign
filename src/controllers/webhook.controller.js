@@ -1,6 +1,7 @@
 const Document = require('../models/document.model');
 const Log = require('../models/log.model');
 const logger = require('../utils/logger');
+const OrganizationLogger = require('../utils/organizationLogger');
 const { formatResponse } = require('../utils/apiUtils');
 const { getAccessToken, createWebhook } = require('../config/adobeSign');
 

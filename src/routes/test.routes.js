@@ -8,6 +8,7 @@ const Document = require('../models/document.model');
 const { getAccessToken, getComprehensiveAgreementInfo } = require('../config/adobeSign');
 const { formatResponse } = require('../utils/apiUtils');
 const logger = require('../utils/logger');
+const { authenticateApiKey } = require('../middleware/apiKeyAuth');
 
 /**
  * Quick test endpoint to verify status updates
@@ -142,6 +143,50 @@ router.get('/status/:id', async (req, res, next) => {
     logger.error(`❌ Test failed: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
+});
+
+/**
+ * Test endpoint to check organization context
+ * @route GET /api/test/organization
+ */
+router.get('/organization', authenticateApiKey, (req, res) => {
+  try {
+    const organizationInfo = {
+      success: true,
+      apiKey: {
+        keyId: req.apiKey?.keyId,
+        name: req.apiKey?.name,
+        permissions: req.apiKey?.permissions,
+        environment: req.apiKey?.environment
+      },
+      organization: req.apiKey?.organization || null,
+      timestamp: new Date().toISOString()
+    };
+    
+    logger.info('Organization context test accessed', {
+      organizationId: req.apiKey?.organization?.id,
+      organizationName: req.apiKey?.organization?.name,
+      keyId: req.apiKey?.keyId
+    });
+    
+    res.json(organizationInfo);
+  } catch (error) {
+    logger.error('Organization context test failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Health check endpoint (no authentication required)
+ * @route GET /api/test/health
+ */
+router.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 module.exports = router;

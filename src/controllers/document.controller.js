@@ -2,6 +2,7 @@ const Document = require('../models/document.model');
 const Log = require('../models/log.model');
 const { ApiError, formatResponse } = require('../utils/apiUtils');
 const logger = require('../utils/logger');
+const OrganizationLogger = require('../utils/organizationLogger');
 const documentUtils = require('../utils/documentUtils');
 const documentProcessor = require('../utils/documentProcessor');
 const rateLimitProtection = require('../utils/rateLimitProtection');
@@ -33,10 +34,16 @@ const urlUtils = require('../utils/urlUtils');
  */
 const extractRecipientsFromTemplateData = (templateData) => {
   const recipients = [];
-  const emailSet = new Set(); // Track emails to prevent duplicates
-  
-  // Add debug logging to see what template data we're working with
-  logger.info('Template data structure:', JSON.stringify(templateData, null, 2));
+  const emailSet = new Set(); // Track emails to prevent duplicates    // Add debug logging to see what template data we're working with
+    OrganizationLogger.info('Template data structure:', req, JSON.stringify(templateData, null, 2));
+    
+    // Add debug logging to see what template data we're working with
+    logger.info('Template data structure:', {
+      organizationId: req.apiKey?.organization?.id,
+      organizationName: req.apiKey?.organization?.name,
+      apiKeyId: req.apiKey?.keyId,
+      data: JSON.stringify(templateData, null, 2)
+    });
   
   // PRIORITY 1: Check for explicit recipients array first
   if (templateData.recipients && Array.isArray(templateData.recipients) && templateData.recipients.length > 0) {
@@ -238,14 +245,59 @@ const retrySigningUrlGeneration = async (agreementId, documentId) => {
  */
 exports.getDocuments = async (req, res, next) => {
   try {
-    const documents = await Document.find().sort({ createdAt: -1 });
+    const { page = 1, limit = 10, status, search } = req.query;
+    
+    // Build query based on organization access
+    const query = {};
+    
+    // Filter by organization if API key is organization-specific
+    if (req.apiKey && req.apiKey.organization && !req.apiKey.permissions.includes('admin:all')) {
+      query.organization = req.apiKey.organization.id;
+    }
+    
+    // Add status filter if provided
+    if (status) {
+      query.status = status;
+    }
+    
+    // Add search filter if provided
+    if (search) {
+      query.$or = [
+        { originalName: { $regex: search, $options: 'i' } },
+        { filename: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const documents = await Document.find(query)
+      .populate('organization', 'name slug')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+    
+    const total = await Document.countDocuments(query);
+    
+    await OrganizationLogger.info('Documents retrieved', req, {
+      action: 'documents_list',
+      count: documents.length,
+      total,
+      filters: { status, search }
+    });
     
     res.json(formatResponse(
-      200,
-      'Documents retrieved successfully',
-      { documents, count: documents.length }
+      {
+        documents, 
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit))
+        }
+      },
+      'Documents retrieved successfully'
     ));
   } catch (error) {
+    await OrganizationLogger.error('Failed to retrieve documents', req, { error: error.message });
     next(error);
   }
 };
@@ -256,39 +308,36 @@ exports.getDocuments = async (req, res, next) => {
  */
 exports.getDocument = async (req, res, next) => {
   try {
-    const document = await Document.findById(req.params.id);
+    const query = { _id: req.params.id };
+    
+    // Filter by organization if API key is organization-specific
+    if (req.apiKey && req.apiKey.organization && !req.apiKey.permissions.includes('admin:all')) {
+      query.organization = req.apiKey.organization.id;
+    }
+    
+    const document = await Document.findOne(query)
+      .populate('organization', 'name slug');
     
     if (!document) {
+      await OrganizationLogger.warn('Document not found or access denied', req, {
+        action: 'document_access_denied',
+        documentId: req.params.id
+      });
       return next(new ApiError(404, 'Document not found'));
     }
-
-    // Auto-sync status from Adobe Sign if document has been sent for signature
-    if (document.adobeAgreementId && ['sent_for_signature', 'out_for_signature', 'partially_signed'].includes(document.status)) {
-      try {
-        logger.info(`Auto-syncing status for document ${document._id} from Adobe Sign`);
-        await syncStatusFromAdobeSign(document);
-        
-        // Reload the document to get updated data
-        const updatedDocument = await Document.findById(req.params.id);
-        
-        res.json(formatResponse(
-          200,
-          'Document retrieved successfully with updated status',
-          { document: updatedDocument }
-        ));
-        return;
-      } catch (syncError) {
-        logger.warn(`Auto-sync failed for document ${document._id}: ${syncError.message}`);
-        // Continue with original document if sync fails
-      }
-    }
     
-    res.json(formatResponse(
-      200,
-      'Document retrieved successfully',
-      { document }
-    ));
+    await OrganizationLogger.info('Document retrieved', req, {
+      action: 'document_view',
+      documentId: document._id,
+      documentName: document.originalName
+    });
+    
+    res.json(formatResponse(document, 'Document retrieved successfully'));
   } catch (error) {
+    await OrganizationLogger.error('Failed to retrieve document', req, { 
+      error: error.message,
+      documentId: req.params.id
+    });
     next(error);
   }
 };
@@ -1856,15 +1905,47 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
     documentData.pageCount = pageCount;
     documentData.status = 'uploaded';
     
+    // Add organization and API key tracking
+    if (req.apiKey) {
+      documentData.organization = req.apiKey.organization.id;
+      documentData.apiKeyId = req.apiKey.keyId;
+    }
+    
     // Create document record
     const document = new Document(documentData);
     await document.save();
+
+    // Increment organization document usage
+    if (req.apiKey && req.apiKey.organization) {
+      try {
+        // This will be handled asynchronously to not block the response
+        const Organization = require('../models/organization.model');
+        const org = await Organization.findById(req.apiKey.organization.id);
+        if (org) {
+          await org.incrementUsage('documents', 1);
+          await OrganizationLogger.info(`Document uploaded successfully: ${document.originalName}`, req, {
+            documentId: document._id,
+            action: 'document_upload',
+            fileSize: document.fileSize,
+            mimeType: document.mimeType
+          });
+          logger.debug(`Incremented document usage for organization: ${org.name}`);
+        }
+      } catch (usageError) {
+        logger.error(`Failed to update organization usage: ${usageError.message}`);
+        // Don't fail the request if usage tracking fails
+      }
+    }
     
     // Debug: Log the saved document's template data
     logger.info('Document saved with templateData:', JSON.stringify(document.templateData, null, 2));
     logger.info('DocumentData templateData before save:', JSON.stringify(documentData.templateData, null, 2));
     
-    logger.info(`Document uploaded successfully: ${document.originalName}`);
+    await OrganizationLogger.info(`Document processing completed: ${document.originalName}`, req, {
+      documentId: document._id,
+      action: 'document_processing_complete',
+      status: document.status
+    });
     
     // Step 2: Prepare for signature (reuse prepareForSignature logic)
     let { recipients, signatureFieldMapping, signingFlow, defaultRecipients } = req.body;

@@ -1,4 +1,5 @@
 const ApiKey = require('../models/apiKey.model');
+const Organization = require('../models/organization.model');
 const { ApiError, formatResponse } = require('../utils/apiUtils');
 const logger = require('../utils/logger');
 
@@ -10,9 +11,13 @@ exports.createApiKey = async (req, res, next) => {
   try {
     const { 
       name, 
+      organizationId,
+      environment = 'production',
       permissions = ['documents:read', 'documents:write'], 
+      scopes = ['document_management'],
       expiresIn,
       allowedIPs = [],
+      allowedDomains = [],
       rateLimit = {},
       metadata = {}
     } = req.body;
@@ -20,9 +25,33 @@ exports.createApiKey = async (req, res, next) => {
     if (!name) {
       return next(new ApiError(400, 'API key name is required'));
     }
-    
-    // Generate new API key
-    const { apiKey, keyId, prefix, keyHash } = ApiKey.generateApiKey();
+
+    if (!organizationId) {
+      return next(new ApiError(400, 'Organization ID is required'));
+    }
+
+    // Verify organization exists and is active
+    const organization = await Organization.findById(organizationId);
+    if (!organization) {
+      return next(new ApiError(404, 'Organization not found'));
+    }
+
+    if (!organization.isActive) {
+      return next(new ApiError(400, 'Cannot create API key for inactive organization'));
+    }
+
+    // Check if organization can create more API keys
+    const existingKeyCount = await ApiKey.countDocuments({
+      organization: organizationId,
+      isActive: true
+    });
+
+    if (existingKeyCount >= organization.settings.maxApiKeys) {
+      return next(new ApiError(400, `Organization has reached the maximum limit of ${organization.settings.maxApiKeys} API keys`));
+    }
+
+    // Generate new API key with organization slug
+    const { apiKey, keyId, prefix, keyHash } = ApiKey.generateApiKey(organization.slug);
     
     // Calculate expiration date
     let expiresAt = null;
@@ -55,19 +84,28 @@ exports.createApiKey = async (req, res, next) => {
       }
     }
     
+    // Merge rate limits with organization defaults
+    const orgDefaults = organization.settings.defaultRateLimit;
+    const finalRateLimit = {
+      requestsPerMinute: rateLimit.requestsPerMinute || orgDefaults.requestsPerMinute,
+      requestsPerHour: rateLimit.requestsPerHour || orgDefaults.requestsPerHour,
+      requestsPerDay: rateLimit.requestsPerDay || orgDefaults.requestsPerDay
+    };
+
     // Create API key document
     const apiKeyDoc = await ApiKey.create({
       name,
       keyId,
       keyHash,
       prefix,
+      organization: organizationId,
+      environment,
       permissions,
+      scopes,
       expiresAt,
       allowedIPs,
-      rateLimit: {
-        requestsPerMinute: rateLimit.requestsPerMinute || 100,
-        requestsPerHour: rateLimit.requestsPerHour || 1000
-      },
+      allowedDomains,
+      rateLimit: finalRateLimit,
       metadata,
       createdBy: req.apiKey ? req.apiKey.keyId : 'system'
     });
@@ -106,15 +144,35 @@ exports.createApiKey = async (req, res, next) => {
  */
 exports.getApiKeys = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, active } = req.query;
+    const { 
+      page = 1, 
+      limit = 10, 
+      active, 
+      organizationId, 
+      environment,
+      search 
+    } = req.query;
     
     const query = {};
     if (active !== undefined) {
       query.isActive = active === 'true';
     }
+    if (organizationId) {
+      query.organization = organizationId;
+    }
+    if (environment) {
+      query.environment = environment;
+    }
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { keyId: { $regex: search, $options: 'i' } }
+      ];
+    }
     
     const apiKeys = await ApiKey.find(query)
       .select('-keyHash')
+      .populate('organization', 'name slug type')
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
@@ -122,8 +180,6 @@ exports.getApiKeys = async (req, res, next) => {
     const total = await ApiKey.countDocuments(query);
     
     res.status(200).json(formatResponse(
-      200,
-      'API keys retrieved successfully',
       {
         apiKeys,
         pagination: {
@@ -132,7 +188,8 @@ exports.getApiKeys = async (req, res, next) => {
           totalItems: total,
           itemsPerPage: parseInt(limit)
         }
-      }
+      },
+      'API keys retrieved successfully'
     ));
   } catch (error) {
     next(error);

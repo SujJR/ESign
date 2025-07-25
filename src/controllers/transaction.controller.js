@@ -3,6 +3,7 @@ const Document = require('../models/document.model');
 const Log = require('../models/log.model');
 const { ApiError, formatResponse } = require('../utils/apiUtils');
 const logger = require('../utils/logger');
+const OrganizationLogger = require('../utils/organizationLogger');
 
 // Import Adobe Sign functions
 const { 
@@ -30,22 +31,40 @@ const createTransaction = async (req, res) => {
 
     // Validate required fields
     if (!transactionId || !documentId) {
+      await OrganizationLogger.warn('Missing required fields for transaction creation', req, {
+        action: 'transaction_create_validation_failed',
+        reason: 'Missing transactionId or documentId'
+      });
       return res.status(400).json(formatResponse(false, 'Transaction ID and Document ID are required', null));
+    }
+
+    // Filter by organization if API key is organization-specific
+    const documentQuery = { _id: documentId };
+    if (req.apiKey && req.apiKey.organization && !req.apiKey.permissions.includes('admin:all')) {
+      documentQuery.organization = req.apiKey.organization.id;
     }
 
     // Check if transaction ID already exists
     const existingTransaction = await Transaction.findOne({ transactionId });
     if (existingTransaction) {
+      await OrganizationLogger.warn('Transaction ID already exists', req, {
+        action: 'transaction_create_duplicate',
+        transactionId
+      });
       return res.status(400).json(formatResponse(false, 'Transaction ID already exists', null));
     }
 
-    // Verify document exists
-    const document = await Document.findById(documentId);
+    // Verify document exists and user has access
+    const document = await Document.findOne(documentQuery);
     if (!document) {
+      await OrganizationLogger.warn('Document not found or access denied for transaction creation', req, {
+        action: 'transaction_create_document_not_found',
+        documentId
+      });
       return res.status(404).json(formatResponse(false, 'Document not found', null));
     }
 
-    // Create transaction
+    // Create transaction with organization context
     const transaction = new Transaction({
       transactionId,
       documentId,
@@ -57,29 +76,32 @@ const createTransaction = async (req, res) => {
       reminderSettings: reminderSettings || {},
       deadlines: deadlines || {},
       notes: notes || '',
-      tags: tags || []
+      tags: tags || [],
+      organization: req.apiKey?.organization?.id || document.organization,
+      apiKeyId: req.apiKey?._id
     });
 
     await transaction.save();
 
-    // Log transaction creation
-    await Log.create({
+    await OrganizationLogger.info('Transaction created successfully', req, {
       action: 'transaction_created',
-      documentId: documentId,
-      transactionId: transactionId,
-      details: { transactionId, documentId },
-      userId: req.user?.id
+      transactionId,
+      documentId,
+      documentName: document.originalName
     });
-
-    logger.info(`Transaction created: ${transactionId} for document: ${documentId}`);
 
     const populatedTransaction = await Transaction.findById(transaction._id)
       .populate('documentId')
-      .populate('creator', 'name email');
+      .populate('creator', 'name email')
+      .populate('organization', 'name slug');
 
     res.status(201).json(formatResponse(true, 'Transaction created successfully', populatedTransaction));
   } catch (error) {
-    logger.error('Error creating transaction:', error);
+    await OrganizationLogger.error('Failed to create transaction', req, { 
+      error: error.message,
+      transactionId: req.body.transactionId,
+      documentId: req.body.documentId
+    });
     res.status(500).json(formatResponse(false, 'Failed to create transaction', null, error.message));
   }
 };
@@ -133,8 +155,22 @@ const getTransactionDetails = async (req, res) => {
   try {
     const { transactionId } = req.params;
 
-    const transaction = await Transaction.findByTransactionId(transactionId);
+    // Build query with organization filtering
+    const query = { transactionId };
+    if (req.apiKey && req.apiKey.organization && !req.apiKey.permissions.includes('admin:all')) {
+      query.organization = req.apiKey.organization.id;
+    }
+
+    const transaction = await Transaction.findOne(query)
+      .populate('documentId')
+      .populate('creator', 'name email')
+      .populate('organization', 'name slug');
+      
     if (!transaction) {
+      await OrganizationLogger.warn('Transaction not found or access denied', req, {
+        action: 'transaction_access_denied',
+        transactionId
+      });
       return res.status(404).json(formatResponse(false, 'Transaction not found', null));
     }
 
@@ -155,13 +191,10 @@ const getTransactionDetails = async (req, res) => {
       }
     }
 
-    // Log transaction view
-    await Log.create({
+    await OrganizationLogger.info('Transaction details retrieved', req, {
       action: 'transaction_viewed',
-      documentId: transaction.documentId._id,
-      transactionId: transactionId,
-      details: { transactionId },
-      userId: req.user?.id
+      transactionId,
+      documentId: transaction.documentId._id
     });
 
     const response = {
@@ -171,7 +204,10 @@ const getTransactionDetails = async (req, res) => {
 
     res.json(formatResponse(true, 'Transaction details retrieved successfully', response));
   } catch (error) {
-    logger.error('Error getting transaction details:', error);
+    await OrganizationLogger.error('Failed to retrieve transaction details', req, { 
+      error: error.message,
+      transactionId: req.params.transactionId
+    });
     res.status(500).json(formatResponse(false, 'Failed to get transaction details', null, error.message));
   }
 };
@@ -193,6 +229,11 @@ const getTransactions = async (req, res) => {
 
     const filter = { isActive: true };
     
+    // Filter by organization if API key is organization-specific
+    if (req.apiKey && req.apiKey.organization && !req.apiKey.permissions.includes('admin:all')) {
+      filter.organization = req.apiKey.organization.id;
+    }
+    
     // Add filters
     if (status) filter.status = status;
     if (participantEmail) filter['participants.email'] = { $regex: participantEmail, $options: 'i' };
@@ -205,15 +246,23 @@ const getTransactions = async (req, res) => {
       sort: { [sortBy]: sortOrder === 'desc' ? -1 : 1 },
       populate: [
         { path: 'documentId', select: 'filename originalName status' },
-        { path: 'creator', select: 'name email' }
+        { path: 'creator', select: 'name email' },
+        { path: 'organization', select: 'name slug' }
       ]
     };
 
     const transactions = await Transaction.paginate(filter, options);
 
+    await OrganizationLogger.info('Transactions retrieved', req, {
+      action: 'transactions_list',
+      count: transactions.docs.length,
+      total: transactions.totalDocs,
+      filters: { status, participantEmail, tags }
+    });
+
     res.json(formatResponse(true, 'Transactions retrieved successfully', transactions));
   } catch (error) {
-    logger.error('Error getting transactions:', error);
+    await OrganizationLogger.error('Failed to retrieve transactions', req, { error: error.message });
     res.status(500).json(formatResponse(false, 'Failed to get transactions', null, error.message));
   }
 };

@@ -37,6 +37,17 @@ const documentSchema = new mongoose.Schema(
       type: String,
       default: null
     },
+    organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: false,
+      default: null
+    },
+    apiKeyId: {
+      type: String,
+      required: false,
+      default: null
+    },
     creator: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -115,6 +126,13 @@ const documentSchema = new mongoose.Schema(
     timestamps: true
   }
 );
+
+// Indexes for efficient queries
+documentSchema.index({ organization: 1, status: 1 });
+documentSchema.index({ apiKeyId: 1 });
+documentSchema.index({ adobeAgreementId: 1 });
+documentSchema.index({ status: 1, createdAt: -1 });
+documentSchema.index({ 'recipients.email': 1 });
 
 const Document = mongoose.model('Document', documentSchema);
 

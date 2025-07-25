@@ -2,12 +2,19 @@ const express = require('express');
 const documentController = require('../controllers/document.controller');
 const documentControllerAdditions = require('../controllers/document.controller.additions');
 const { uploadDocument, uploadDocumentWithData, uploadDocumentFromUrl, handleMulterErrors } = require('../middleware/upload');
-const { authenticateApiKey, requirePermissions } = require('../middleware/apiKeyAuth');
+const { 
+  authenticateApiKey, 
+  requirePermissions, 
+  requireScopes, 
+  requireOrganizationFeatures,
+  checkDomainRestrictions 
+} = require('../middleware/apiKeyAuth');
 
 const router = express.Router();
 
 // Apply API key authentication to all routes
 router.use(authenticateApiKey);
+router.use(checkDomainRestrictions);
 
 /**
  * @swagger
@@ -115,7 +122,14 @@ router.use(authenticateApiKey);
  *               $ref: '#/components/schemas/Error'
  */
 // Combined upload, prepare, and send endpoint (supports all 3 methods)
-router.post('/upload-and-send', requirePermissions(['documents:send', 'documents:write', 'admin:all']), uploadDocumentWithData, handleMulterErrors, documentController.uploadPrepareAndSend);
+router.post('/upload-and-send', 
+  requirePermissions(['documents:send', 'documents:write', 'admin:all']),
+  requireScopes(['document_management', 'signature_workflow', 'full_access']),
+  requireOrganizationFeatures(['document_upload', 'document_send']),
+  uploadDocumentWithData, 
+  handleMulterErrors, 
+  documentController.uploadPrepareAndSend
+);
 
 /**
  * @swagger
@@ -189,7 +203,11 @@ router.post('/upload-and-send', requirePermissions(['documents:send', 'documents
  *               $ref: '#/components/schemas/Error'
  */
 // Get all documents for user
-router.get('/', requirePermissions(['documents:read', 'admin:all']), documentController.getDocuments);
+router.get('/', 
+  requirePermissions(['documents:read', 'admin:all']),
+  requireScopes(['document_management', 'full_access']),
+  documentController.getDocuments
+);
 
 /**
  * @swagger
@@ -232,7 +250,11 @@ router.get('/', requirePermissions(['documents:read', 'admin:all']), documentCon
  *               $ref: '#/components/schemas/Error'
  */
 // Get specific document
-router.get('/:id', requirePermissions(['documents:read', 'admin:all']), documentController.getDocument);
+router.get('/:id', 
+  requirePermissions(['documents:read', 'admin:all']),
+  requireScopes(['document_management', 'full_access']),
+  documentController.getDocument
+);
 
 /**
  * @swagger
@@ -291,7 +313,12 @@ router.get('/:id', requirePermissions(['documents:read', 'admin:all']), document
  *               $ref: '#/components/schemas/Error'
  */
 // Check document status
-router.get('/:id/status', requirePermissions(['documents:read', 'admin:all']), documentController.checkDocumentStatus);
+router.get('/:id/status', 
+  requirePermissions(['documents:read', 'admin:all']),
+  requireScopes(['document_management', 'signature_workflow', 'full_access']),
+  requireOrganizationFeatures(['document_status']),
+  documentController.checkDocumentStatus
+);
 
 /**
  * @swagger
@@ -341,7 +368,12 @@ router.get('/:id/status', requirePermissions(['documents:read', 'admin:all']), d
  *               $ref: '#/components/schemas/Error'
  */
 // Download document
-router.get('/:id/download', requirePermissions(['documents:read', 'admin:all']), documentController.downloadDocument);
+router.get('/:id/download', 
+  requirePermissions(['documents:read', 'admin:all']),
+  requireScopes(['document_management', 'full_access']),
+  requireOrganizationFeatures(['document_download']),
+  documentController.downloadDocument
+);
 
 /**
  * @swagger
@@ -422,6 +454,11 @@ router.get('/:id/download', requirePermissions(['documents:read', 'admin:all']),
  *               $ref: '#/components/schemas/Error'
  */
 // Send reminder to recipients who haven't signed yet
-router.post('/:id/send-reminder', requirePermissions(['documents:send', 'admin:all']), documentController.sendReminder);
+router.post('/:id/send-reminder', 
+  requirePermissions(['documents:send', 'admin:all']),
+  requireScopes(['signature_workflow', 'full_access']),
+  requireOrganizationFeatures(['document_send']),
+  documentController.sendReminder
+);
 
 module.exports = router;

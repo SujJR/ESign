@@ -51,6 +51,17 @@ const transactionSchema = new mongoose.Schema(
       required: false,
       default: null
     },
+    organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: false,
+      default: null
+    },
+    apiKeyId: {
+      type: String,
+      required: false,
+      default: null
+    },
     metadata: {
       type: mongoose.Schema.Types.Mixed,
       default: {}
@@ -92,6 +103,10 @@ transactionSchema.index({ adobeAgreementId: 1 });
 transactionSchema.index({ status: 1 });
 transactionSchema.index({ 'participants.email': 1 });
 transactionSchema.index({ creator: 1 });
+transactionSchema.index({ organization: 1 });
+transactionSchema.index({ apiKeyId: 1 });
+transactionSchema.index({ organization: 1, status: 1 });
+transactionSchema.index({ organization: 1, createdAt: -1 });
 transactionSchema.index({ isActive: 1 });
 
 // Virtual for getting active participants

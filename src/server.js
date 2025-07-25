@@ -18,6 +18,7 @@ const { swaggerServe, swaggerSetup } = require('./config/swagger');
 const documentRoutes = require('./routes/document.routes');
 const enhancedRoutes = require('./routes/enhanced.routes');
 const apiKeyRoutes = require('./routes/apiKey.routes');
+const organizationRoutes = require('./routes/organization.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const testRoutes = require('./routes/test.routes');
 const transactionRoutes = require('./routes/transaction.routes'); // Use real routes
@@ -96,6 +97,7 @@ app.get('/', (req, res) => {
       documents: '/api/documents',
       enhanced: '/api/enhanced', 
       apiKeys: '/api/auth/api-keys',
+      organizations: '/api/organizations',
       webhooks: '/api/webhooks',
       transactions: '/api/transactions',
       docs: '/api-docs'
@@ -115,6 +117,7 @@ app.use('/api-docs', swaggerServe, swaggerSetup);
 app.use('/api/documents', documentRoutes);
 app.use('/api/enhanced', enhancedRoutes);
 app.use('/api/auth/api-keys', apiKeyRoutes);
+app.use('/api/organizations', organizationRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/test', testRoutes);

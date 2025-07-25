@@ -1,4 +1,5 @@
 const ApiKey = require('../models/apiKey.model');
+const Organization = require('../models/organization.model');
 const { ApiError } = require('../utils/apiUtils');
 const logger = require('../utils/logger');
 
@@ -52,18 +53,25 @@ exports.authenticateApiKey = async (req, res, next) => {
     }
     
     // Extract keyId from the API key
-    const keyIdMatch = apiKey.match(/^(ak_[a-f0-9]{8})_/);
+    const keyIdMatch = apiKey.match(/^(ak_[a-z0-9-]+_[a-f0-9]{8})_/);
     if (!keyIdMatch) {
       return next(new ApiError(401, 'Invalid API key format.'));
     }
     
     const keyId = keyIdMatch[1];
     
-    // Find the API key in database
-    const apiKeyDoc = await ApiKey.findOne({ keyId }).select('+keyHash');
+    // Find the API key in database with organization info
+    const apiKeyDoc = await ApiKey.findOne({ keyId })
+      .select('+keyHash')
+      .populate('organization', 'name slug type isActive settings billing');
     
     if (!apiKeyDoc) {
       return next(new ApiError(401, 'Invalid API key.'));
+    }
+
+    // Check if organization is active
+    if (!apiKeyDoc.organization.isActive) {
+      return next(new ApiError(401, 'Organization is inactive.'));
     }
     
     // Verify the API key
@@ -93,12 +101,14 @@ exports.authenticateApiKey = async (req, res, next) => {
       }
     }
     
-    // Rate limiting check
+    // Rate limiting check with organization-specific limits
     const rateLimitKey = `${keyId}_${Date.now() - (Date.now() % 60000)}`; // Per minute
     const rateLimitKeyHour = `${keyId}_${Date.now() - (Date.now() % 3600000)}`; // Per hour
+    const rateLimitKeyDay = `${keyId}_${Date.now() - (Date.now() % 86400000)}`; // Per day
     
     const currentMinuteCount = rateLimitStore.get(rateLimitKey) || 0;
     const currentHourCount = rateLimitStore.get(rateLimitKeyHour) || 0;
+    const currentDayCount = rateLimitStore.get(rateLimitKeyDay) || 0;
     
     if (currentMinuteCount >= apiKeyDoc.rateLimit.requestsPerMinute) {
       return next(new ApiError(429, 'Rate limit exceeded. Too many requests per minute.'));
@@ -107,10 +117,21 @@ exports.authenticateApiKey = async (req, res, next) => {
     if (currentHourCount >= apiKeyDoc.rateLimit.requestsPerHour) {
       return next(new ApiError(429, 'Rate limit exceeded. Too many requests per hour.'));
     }
+
+    if (apiKeyDoc.rateLimit.requestsPerDay && currentDayCount >= apiKeyDoc.rateLimit.requestsPerDay) {
+      return next(new ApiError(429, 'Rate limit exceeded. Too many requests per day.'));
+    }
+
+    // Check organization usage limits
+    const orgLimits = apiKeyDoc.organization.isWithinLimits();
+    if (!orgLimits.canProceed) {
+      return next(new ApiError(429, 'Organization has exceeded monthly usage limits.'));
+    }
     
     // Update rate limit counters
     rateLimitStore.set(rateLimitKey, currentMinuteCount + 1);
     rateLimitStore.set(rateLimitKeyHour, currentHourCount + 1);
+    rateLimitStore.set(rateLimitKeyDay, currentDayCount + 1);
     
     // Clean up old entries (cleanup every 100 requests)
     if (Math.random() < 0.01) {
@@ -121,19 +142,36 @@ exports.authenticateApiKey = async (req, res, next) => {
     apiKeyDoc.updateUsage().catch(err => {
       logger.error('Failed to update API key usage:', err);
     });
+
+    // Increment organization API call usage
+    apiKeyDoc.organization.incrementUsage('apiCalls', 1).catch(err => {
+      logger.error('Failed to update organization usage:', err);
+    });
     
-    // Add API key info to request object
+    // Add API key and organization info to request object
     req.apiKey = {
       keyId: apiKeyDoc.keyId,
       name: apiKeyDoc.name,
       permissions: apiKeyDoc.permissions,
-      metadata: apiKeyDoc.metadata
+      scopes: apiKeyDoc.scopes,
+      environment: apiKeyDoc.environment,
+      metadata: apiKeyDoc.metadata,
+      organization: {
+        id: apiKeyDoc.organization._id,
+        name: apiKeyDoc.organization.name,
+        slug: apiKeyDoc.organization.slug,
+        type: apiKeyDoc.organization.type,
+        settings: apiKeyDoc.organization.settings,
+        billing: apiKeyDoc.organization.billing
+      }
     };
     
     // Log API key usage
     logger.info(`API key authenticated: ${apiKeyDoc.keyId}`, {
       keyId: apiKeyDoc.keyId,
       keyName: apiKeyDoc.name,
+      organizationId: apiKeyDoc.organization._id,
+      organizationName: apiKeyDoc.organization.name,
       endpoint: req.path,
       method: req.method,
       ip: req.ip
@@ -174,6 +212,102 @@ exports.requirePermissions = (requiredPermissions) => {
     
     next();
   };
+};
+
+/**
+ * Middleware to check if API key has required scopes
+ */
+exports.requireScopes = (...scopes) => {
+  return (req, res, next) => {
+    if (!req.apiKey) {
+      return next(new ApiError(401, 'Authentication required.'));
+    }
+    
+    // Admin keys have all scopes
+    if (req.apiKey.scopes.includes('full_access')) {
+      return next();
+    }
+    
+    // Check if API key has any of the required scopes
+    const hasScope = scopes.some(scope => 
+      req.apiKey.scopes.includes(scope)
+    );
+    
+    if (!hasScope) {
+      return next(new ApiError(403, `Insufficient scope. Required: ${scopes.join(' or ')}`));
+    }
+    
+    next();
+  };
+};
+
+/**
+ * Middleware to check if organization has required features
+ */
+exports.requireOrganizationFeatures = (...features) => {
+  return (req, res, next) => {
+    if (!req.apiKey || !req.apiKey.organization) {
+      return next(new ApiError(401, 'Authentication required.'));
+    }
+    
+    // Check if organization has all required features
+    const missingFeatures = features.filter(feature => 
+      !req.apiKey.organization.settings.allowedFeatures.includes(feature)
+    );
+    
+    if (missingFeatures.length > 0) {
+      return next(new ApiError(403, `Organization missing required features: ${missingFeatures.join(', ')}`));
+    }
+    
+    next();
+  };
+};
+
+/**
+ * Middleware to check organization environment restrictions
+ */
+exports.requireEnvironment = (...environments) => {
+  return (req, res, next) => {
+    if (!req.apiKey) {
+      return next(new ApiError(401, 'Authentication required.'));
+    }
+    
+    if (!environments.includes(req.apiKey.environment)) {
+      return next(new ApiError(403, `API key environment '${req.apiKey.environment}' not allowed for this endpoint.`));
+    }
+    
+    next();
+  };
+};
+
+/**
+ * Middleware to check domain restrictions
+ */
+exports.checkDomainRestrictions = (req, res, next) => {
+  if (!req.apiKey) {
+    return next(new ApiError(401, 'Authentication required.'));
+  }
+
+  // Get the origin domain from request
+  const origin = req.get('origin') || req.get('referer');
+  
+  if (req.apiKey.allowedDomains && req.apiKey.allowedDomains.length > 0 && origin) {
+    const requestDomain = new URL(origin).hostname;
+    const isAllowed = req.apiKey.allowedDomains.some(allowedDomain => {
+      return requestDomain === allowedDomain || requestDomain.endsWith(`.${allowedDomain}`);
+    });
+    
+    if (!isAllowed) {
+      logger.warn(`API key access denied from domain: ${requestDomain}`, {
+        keyId: req.apiKey.keyId,
+        requestDomain,
+        allowedDomains: req.apiKey.allowedDomains
+      });
+      return next(new ApiError(403, 'Access denied from this domain.'));
+    }
+  }
+  
+  next();
 };
 
 /**
