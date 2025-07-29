@@ -6,7 +6,6 @@ const {
   authenticateApiKey, 
   requirePermissions, 
   requireScopes, 
-  requireOrganizationFeatures,
   checkDomainRestrictions 
 } = require('../middleware/apiKeyAuth');
 
@@ -125,7 +124,6 @@ router.use(checkDomainRestrictions);
 router.post('/upload-and-send', 
   requirePermissions(['documents:send', 'documents:write', 'admin:all']),
   requireScopes(['document_management', 'signature_workflow', 'full_access']),
-  requireOrganizationFeatures(['document_upload', 'document_send']),
   uploadDocumentWithData, 
   handleMulterErrors, 
   documentController.uploadPrepareAndSend
@@ -316,7 +314,6 @@ router.get('/:id',
 router.get('/:id/status', 
   requirePermissions(['documents:read', 'admin:all']),
   requireScopes(['document_management', 'signature_workflow', 'full_access']),
-  requireOrganizationFeatures(['document_status']),
   documentController.checkDocumentStatus
 );
 
@@ -371,7 +368,6 @@ router.get('/:id/status',
 router.get('/:id/download', 
   requirePermissions(['documents:read', 'admin:all']),
   requireScopes(['document_management', 'full_access']),
-  requireOrganizationFeatures(['document_download']),
   documentController.downloadDocument
 );
 
@@ -457,7 +453,6 @@ router.get('/:id/download',
 router.post('/:id/send-reminder', 
   requirePermissions(['documents:send', 'admin:all']),
   requireScopes(['signature_workflow', 'full_access']),
-  requireOrganizationFeatures(['document_send']),
   documentController.sendReminder
 );
 

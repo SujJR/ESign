@@ -26,13 +26,15 @@ const connectDB = async () => {
 
 const generateApiKey = async (name, permissions, options = {}) => {
   try {
-    const { apiKey, keyId, prefix, keyHash } = ApiKey.generateApiKey();
+    const { apiKey, keyId, prefix, keyHash } = ApiKey.generateApiKey(options.assignedTo || 'admin');
     
     const apiKeyDoc = await ApiKey.create({
       name,
       keyId,
       keyHash,
       prefix,
+      description: options.description || '',
+      assignedTo: options.assignedTo || '',
       permissions,
       expiresAt: options.expiresAt || null,
       allowedIPs: options.allowedIPs || [],
@@ -49,6 +51,7 @@ const generateApiKey = async (name, permissions, options = {}) => {
     console.log(`Name: ${name}`);
     console.log(`API Key: ${apiKey}`);
     console.log(`Key ID: ${keyId}`);
+    console.log(`Assigned To: ${options.assignedTo || 'Not specified'}`);
     console.log(`Permissions: ${permissions.join(', ')}`);
     console.log(`Rate Limit: ${apiKeyDoc.rateLimit.requestsPerMinute}/min, ${apiKeyDoc.rateLimit.requestsPerHour}/hour`);
     if (options.expiresAt) {
@@ -94,6 +97,8 @@ const generateInitialKeys = async () => {
       'Admin API Key',
       ['admin:all'],
       {
+        assignedTo: 'System Administrator',
+        description: 'Full admin access API key for system management',
         requestsPerMinute: 500,
         requestsPerHour: 5000,
         metadata: {
@@ -108,6 +113,8 @@ const generateInitialKeys = async () => {
       'Document Management API Key',
       ['documents:read', 'documents:write', 'documents:send'],
       {
+        assignedTo: 'Document Manager',
+        description: 'API key for document operations and e-signature workflows',
         expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
         metadata: {
           description: 'Document management operations',
@@ -121,6 +128,8 @@ const generateInitialKeys = async () => {
       'Read-Only API Key',
       ['documents:read', 'logs:read'],
       {
+        assignedTo: 'Monitoring Service',
+        description: 'Read-only access for monitoring and reporting',
         requestsPerMinute: 200,
         requestsPerHour: 2000,
         expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days

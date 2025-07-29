@@ -25,11 +25,16 @@ const apiKeySchema = new mongoose.Schema(
       required: true,
       length: 8
     },
-    organization: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Organization',
-      required: true,
-      index: true
+    description: {
+      type: String,
+      trim: true,
+      maxlength: 500
+    },
+    assignedTo: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      description: 'Person or product this key is assigned to'
     },
     environment: {
       type: String,
@@ -129,18 +134,18 @@ const apiKeySchema = new mongoose.Schema(
 
 // Index for efficient queries
 apiKeySchema.index({ keyId: 1, isActive: 1 });
-apiKeySchema.index({ organization: 1, isActive: 1 });
 apiKeySchema.index({ environment: 1 });
 apiKeySchema.index({ expiresAt: 1 });
 apiKeySchema.index({ lastUsed: 1 });
+apiKeySchema.index({ assignedTo: 1 });
 
 // Static method to generate a new API key
-apiKeySchema.statics.generateApiKey = function(organizationSlug = 'default') {
+apiKeySchema.statics.generateApiKey = function(suffix = 'default') {
   // Generate a random API key
   const apiKey = crypto.randomBytes(32).toString('hex');
   const prefix = apiKey.substring(0, 8);
-  // Include organization slug in keyId for better identification
-  const keyId = `ak_${organizationSlug}_${prefix}`;
+  // Include suffix in keyId for better identification
+  const keyId = `ak_${suffix}_${prefix}`;
   
   return {
     apiKey: `${keyId}_${apiKey}`,
@@ -173,11 +178,6 @@ apiKeySchema.methods.hasPermission = function(permission) {
 // Method to check scopes
 apiKeySchema.methods.hasScope = function(scope) {
   return this.scopes.includes(scope) || this.scopes.includes('full_access');
-};
-
-// Method to check if key belongs to organization
-apiKeySchema.methods.belongsToOrganization = function(organizationId) {
-  return this.organization.toString() === organizationId.toString();
 };
 
 // Method to update usage statistics

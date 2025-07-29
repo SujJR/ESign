@@ -5,8 +5,44 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'E-Signature API - Complete Collection with Enhanced Workflow',
-      description: 'Run node generate-api-keys.js and authorize the X-API-Key header to access the API.',
+      title: 'E-Signature API - Simplified API Key Management',
+      version: '2.0.0',
+      description: `
+# E-Signature API with Simplified API Key Management
+
+## 🔑 Authentication
+This API uses **API Key authentication exclusively**. All endpoints require a valid API key.
+
+### Getting Started:
+1. **Generate Admin Key**: Run \`node generate-api-keys.js\` in your project directory
+2. **Use Admin Key**: Use the admin API key to create additional keys for different people/products
+3. **Set Headers**: Include your API key in the \`X-API-Key\` header
+
+### Authentication Methods:
+- **Header**: \`X-API-Key: your_api_key\`
+- **Authorization**: \`Authorization: Bearer your_api_key\`
+- **Query**: \`?api_key=your_api_key\`
+
+## 📋 API Key Management (Admin Only)
+- **Create**: Generate new API keys for different users/products
+- **List**: View all API keys with filtering
+- **Update**: Modify key properties and permissions
+- **Rotate**: Generate new key value (for security)
+- **Delete**: Deactivate unused keys
+
+## 🔐 Security Features
+- **Rate Limiting**: Configurable per-key limits
+- **IP Restrictions**: Limit access by IP address
+- **Expiration**: Set key expiration dates
+- **Permissions**: Granular permission system
+- **Audit Trail**: Complete usage logging
+
+⚠️ **Important**: Keep your API keys secure and rotate them regularly.
+      `,
+      contact: {
+        name: 'API Support',
+        email: 'support@esign-api.com'
+      }
     },
     tags: [
       {
@@ -14,8 +50,24 @@ const options = {
         description: 'API health and status endpoints'
       },
       {
+        name: 'API Keys',
+        description: 'API key management operations (Admin only)'
+      },
+      {
         name: 'Documents',
-        description: 'Document management operations'
+        description: 'Document management and e-signature operations'
+      },
+      {
+        name: 'Signature Workflow',
+        description: 'Document signing workflow management'
+      },
+      {
+        name: 'Transactions',
+        description: 'Transaction tracking and management'
+      },
+      {
+        name: 'Webhooks',
+        description: 'Webhook integration for real-time updates'
       },
       {
         name: 'Adobe Sign',
@@ -34,10 +86,54 @@ const options = {
           type: 'apiKey',
           in: 'header',
           name: 'X-API-Key',
-          description: 'API Key for authentication - manually authorized'
+          description: 'API Key for authentication. Admin keys can manage other keys.'
         }
       },
       schemas: {
+        ApiKey: {
+          type: 'object',
+          properties: {
+            _id: { type: 'string', description: 'Database ID' },
+            keyId: { type: 'string', description: 'Unique key identifier' },
+            name: { type: 'string', description: 'API key name' },
+            description: { type: 'string', description: 'API key description' },
+            assignedTo: { type: 'string', description: 'Person or product assigned' },
+            environment: { 
+              type: 'string', 
+              enum: ['development', 'staging', 'production'],
+              description: 'Environment the key is for' 
+            },
+            permissions: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of permissions granted to this key'
+            },
+            scopes: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of scopes for this key'
+            },
+            isActive: { type: 'boolean', description: 'Whether the key is active' },
+            usageCount: { type: 'number', description: 'Total number of API calls made' },
+            lastUsed: { type: 'string', format: 'date-time', description: 'Last usage timestamp' },
+            expiresAt: { type: 'string', format: 'date-time', description: 'Key expiration date' },
+            rateLimit: {
+              type: 'object',
+              properties: {
+                requestsPerMinute: { type: 'number', description: 'Requests allowed per minute' },
+                requestsPerHour: { type: 'number', description: 'Requests allowed per hour' },
+                requestsPerDay: { type: 'number', description: 'Requests allowed per day' }
+              }
+            },
+            allowedIPs: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of allowed IP addresses'
+            },
+            createdAt: { type: 'string', format: 'date-time', description: 'Creation timestamp' },
+            updatedAt: { type: 'string', format: 'date-time', description: 'Last update timestamp' }
+          }
+        },
         Document: {
           type: 'object',
           properties: {

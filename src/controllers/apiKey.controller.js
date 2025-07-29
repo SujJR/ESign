@@ -1,17 +1,17 @@
 const ApiKey = require('../models/apiKey.model');
-const Organization = require('../models/organization.model');
 const { ApiError, formatResponse } = require('../utils/apiUtils');
 const logger = require('../utils/logger');
 
 /**
- * Create a new API key
+ * Create a new API key (Admin only)
  * @route POST /api/auth/api-keys
  */
 exports.createApiKey = async (req, res, next) => {
   try {
     const { 
       name, 
-      organizationId,
+      description,
+      assignedTo,
       environment = 'production',
       permissions = ['documents:read', 'documents:write'], 
       scopes = ['document_management'],
@@ -26,32 +26,8 @@ exports.createApiKey = async (req, res, next) => {
       return next(new ApiError(400, 'API key name is required'));
     }
 
-    if (!organizationId) {
-      return next(new ApiError(400, 'Organization ID is required'));
-    }
-
-    // Verify organization exists and is active
-    const organization = await Organization.findById(organizationId);
-    if (!organization) {
-      return next(new ApiError(404, 'Organization not found'));
-    }
-
-    if (!organization.isActive) {
-      return next(new ApiError(400, 'Cannot create API key for inactive organization'));
-    }
-
-    // Check if organization can create more API keys
-    const existingKeyCount = await ApiKey.countDocuments({
-      organization: organizationId,
-      isActive: true
-    });
-
-    if (existingKeyCount >= organization.settings.maxApiKeys) {
-      return next(new ApiError(400, `Organization has reached the maximum limit of ${organization.settings.maxApiKeys} API keys`));
-    }
-
-    // Generate new API key with organization slug
-    const { apiKey, keyId, prefix, keyHash } = ApiKey.generateApiKey(organization.slug);
+    // Generate new API key
+    const { apiKey, keyId, prefix, keyHash } = ApiKey.generateApiKey(assignedTo || 'user');
     
     // Calculate expiration date
     let expiresAt = null;
@@ -84,12 +60,11 @@ exports.createApiKey = async (req, res, next) => {
       }
     }
     
-    // Merge rate limits with organization defaults
-    const orgDefaults = organization.settings.defaultRateLimit;
+    // Set default rate limits
     const finalRateLimit = {
-      requestsPerMinute: rateLimit.requestsPerMinute || orgDefaults.requestsPerMinute,
-      requestsPerHour: rateLimit.requestsPerHour || orgDefaults.requestsPerHour,
-      requestsPerDay: rateLimit.requestsPerDay || orgDefaults.requestsPerDay
+      requestsPerMinute: rateLimit.requestsPerMinute || 100,
+      requestsPerHour: rateLimit.requestsPerHour || 1000,
+      requestsPerDay: rateLimit.requestsPerDay || 10000
     };
 
     // Create API key document
@@ -98,7 +73,8 @@ exports.createApiKey = async (req, res, next) => {
       keyId,
       keyHash,
       prefix,
-      organization: organizationId,
+      description,
+      assignedTo,
       environment,
       permissions,
       scopes,
@@ -113,25 +89,27 @@ exports.createApiKey = async (req, res, next) => {
     logger.info(`API key created: ${keyId}`, {
       keyId,
       name,
+      assignedTo,
       permissions,
       createdBy: req.apiKey ? req.apiKey.keyId : 'system'
     });
     
     // Return the API key (only time it's shown in full)
     res.status(201).json(formatResponse(
-      201,
-      'API key created successfully',
       {
         apiKey,
         keyId,
         name,
+        description,
+        assignedTo,
         permissions,
         expiresAt,
         allowedIPs,
         rateLimit: apiKeyDoc.rateLimit,
         metadata,
         warning: 'This is the only time the full API key will be shown. Please store it securely.'
-      }
+      },
+      'API key created successfully'
     ));
   } catch (error) {
     next(error);
@@ -139,7 +117,7 @@ exports.createApiKey = async (req, res, next) => {
 };
 
 /**
- * Get all API keys (without the actual key values)
+ * Get all API keys (without the actual key values) - Admin only
  * @route GET /api/auth/api-keys
  */
 exports.getApiKeys = async (req, res, next) => {
@@ -148,8 +126,8 @@ exports.getApiKeys = async (req, res, next) => {
       page = 1, 
       limit = 10, 
       active, 
-      organizationId, 
       environment,
+      assignedTo,
       search 
     } = req.query;
     
@@ -157,22 +135,22 @@ exports.getApiKeys = async (req, res, next) => {
     if (active !== undefined) {
       query.isActive = active === 'true';
     }
-    if (organizationId) {
-      query.organization = organizationId;
-    }
     if (environment) {
       query.environment = environment;
+    }
+    if (assignedTo) {
+      query.assignedTo = { $regex: assignedTo, $options: 'i' };
     }
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
-        { keyId: { $regex: search, $options: 'i' } }
+        { keyId: { $regex: search, $options: 'i' } },
+        { assignedTo: { $regex: search, $options: 'i' } }
       ];
     }
     
     const apiKeys = await ApiKey.find(query)
       .select('-keyHash')
-      .populate('organization', 'name slug type')
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
@@ -197,7 +175,7 @@ exports.getApiKeys = async (req, res, next) => {
 };
 
 /**
- * Get specific API key details
+ * Get specific API key details - Admin only
  * @route GET /api/auth/api-keys/:keyId
  */
 exports.getApiKey = async (req, res, next) => {
@@ -211,9 +189,8 @@ exports.getApiKey = async (req, res, next) => {
     }
     
     res.status(200).json(formatResponse(
-      200,
-      'API key retrieved successfully',
-      { apiKey }
+      { apiKey },
+      'API key retrieved successfully'
     ));
   } catch (error) {
     next(error);
@@ -221,7 +198,7 @@ exports.getApiKey = async (req, res, next) => {
 };
 
 /**
- * Update API key
+ * Update API key - Admin only
  * @route PUT /api/auth/api-keys/:keyId
  */
 exports.updateApiKey = async (req, res, next) => {
@@ -229,6 +206,8 @@ exports.updateApiKey = async (req, res, next) => {
     const { keyId } = req.params;
     const { 
       name, 
+      description,
+      assignedTo,
       permissions, 
       isActive, 
       allowedIPs, 
@@ -244,6 +223,8 @@ exports.updateApiKey = async (req, res, next) => {
     
     // Update fields
     if (name !== undefined) apiKey.name = name;
+    if (description !== undefined) apiKey.description = description;
+    if (assignedTo !== undefined) apiKey.assignedTo = assignedTo;
     if (permissions !== undefined) apiKey.permissions = permissions;
     if (isActive !== undefined) apiKey.isActive = isActive;
     if (allowedIPs !== undefined) apiKey.allowedIPs = allowedIPs;
@@ -263,9 +244,8 @@ exports.updateApiKey = async (req, res, next) => {
     });
     
     res.status(200).json(formatResponse(
-      200,
-      'API key updated successfully',
-      { apiKey }
+      { apiKey },
+      'API key updated successfully'
     ));
   } catch (error) {
     next(error);
@@ -273,10 +253,10 @@ exports.updateApiKey = async (req, res, next) => {
 };
 
 /**
- * Deactivate API key
+ * Delete API key - Admin only
  * @route DELETE /api/auth/api-keys/:keyId
  */
-exports.deactivateApiKey = async (req, res, next) => {
+exports.deleteApiKey = async (req, res, next) => {
   try {
     const { keyId } = req.params;
     
@@ -287,17 +267,21 @@ exports.deactivateApiKey = async (req, res, next) => {
     }
     
     apiKey.isActive = false;
+    apiKey.metadata = { 
+      ...apiKey.metadata, 
+      deletedAt: new Date(),
+      deletedBy: req.apiKey ? req.apiKey.keyId : 'system'
+    };
     await apiKey.save();
     
-    logger.info(`API key deactivated: ${keyId}`, {
+    logger.info(`API key deleted: ${keyId}`, {
       keyId,
-      deactivatedBy: req.apiKey ? req.apiKey.keyId : 'system'
+      deletedBy: req.apiKey ? req.apiKey.keyId : 'system'
     });
     
     res.status(200).json(formatResponse(
-      200,
-      'API key deactivated successfully',
-      { keyId }
+      { keyId },
+      'API key deleted successfully'
     ));
   } catch (error) {
     next(error);
@@ -305,7 +289,7 @@ exports.deactivateApiKey = async (req, res, next) => {
 };
 
 /**
- * Get API key usage statistics
+ * Get API key usage statistics - Admin only
  * @route GET /api/auth/api-keys/:keyId/stats
  */
 exports.getApiKeyStats = async (req, res, next) => {
@@ -322,6 +306,7 @@ exports.getApiKeyStats = async (req, res, next) => {
     const stats = {
       keyId: apiKey.keyId,
       name: apiKey.name,
+      assignedTo: apiKey.assignedTo,
       usageCount: apiKey.usageCount,
       lastUsed: apiKey.lastUsed,
       createdAt: apiKey.createdAt,
@@ -335,9 +320,8 @@ exports.getApiKeyStats = async (req, res, next) => {
     };
     
     res.status(200).json(formatResponse(
-      200,
-      'API key statistics retrieved successfully',
-      { stats }
+      { stats },
+      'API key statistics retrieved successfully'
     ));
   } catch (error) {
     next(error);
@@ -345,10 +329,10 @@ exports.getApiKeyStats = async (req, res, next) => {
 };
 
 /**
- * Regenerate API key
- * @route POST /api/auth/api-keys/:keyId/regenerate
+ * Rotate/Regenerate API key - Admin only
+ * @route POST /api/auth/api-keys/:keyId/rotate
  */
-exports.regenerateApiKey = async (req, res, next) => {
+exports.rotateApiKey = async (req, res, next) => {
   try {
     const { keyId } = req.params;
     
@@ -358,26 +342,35 @@ exports.regenerateApiKey = async (req, res, next) => {
       return next(new ApiError(404, 'API key not found'));
     }
     
-    // Generate new API key
+    // Generate new API key while preserving the same keyId and all other data
     const { apiKey, keyHash } = ApiKey.generateApiKey();
     
-    // Update the existing document with new key
+    // Update the existing document with new key hash only
     existingApiKey.keyHash = keyHash;
+    existingApiKey.metadata = {
+      ...existingApiKey.metadata,
+      rotatedAt: new Date(),
+      rotatedBy: req.apiKey ? req.apiKey.keyId : 'system',
+      previousRotations: (existingApiKey.metadata.previousRotations || 0) + 1
+    };
     await existingApiKey.save();
     
-    logger.info(`API key regenerated: ${keyId}`, {
+    logger.info(`API key rotated: ${keyId}`, {
       keyId,
-      regeneratedBy: req.apiKey ? req.apiKey.keyId : 'system'
+      rotatedBy: req.apiKey ? req.apiKey.keyId : 'system'
     });
     
     res.status(200).json(formatResponse(
-      200,
-      'API key regenerated successfully',
       {
         apiKey,
         keyId,
-        warning: 'This is the only time the new API key will be shown. Please store it securely.'
-      }
+        name: existingApiKey.name,
+        assignedTo: existingApiKey.assignedTo,
+        permissions: existingApiKey.permissions,
+        rotatedAt: new Date(),
+        warning: 'This is the only time the new API key will be shown. Please store it securely. The old key is now invalid.'
+      },
+      'API key rotated successfully'
     ));
   } catch (error) {
     next(error);

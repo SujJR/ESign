@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "E-Signature API - Complete Collection with Enhanced Workflow",
-    "description": "Complete API collection for E-Signature application with template processing, Adobe Sign integration, reminder management, iframe-compatible signing URLs, webhook integration, and comprehensive Transaction Management System.\n\n🔑 AUTHENTICATION: This API uses API Key authentication exclusively. Include your API key in the X-API-Key header for all requests.\n\n🚀 UNIFIED ENDPOINT: All document upload, preparation, and sending operations are now combined into ONE powerful endpoint:\n• `/api/documents/upload-and-send` - Supports 3 upload methods in one interface\n• Method 1: File Upload + JSON File (multipart/form-data)\n• Method 2: Document URL + Inline JSON (application/json)\n\n🔄 TRANSACTION MANAGEMENT: Complete transaction tracking and management system:\n• Create and track signature transactions\n• Monitor participant status and signing progress\n• Send automated reminders to pending signers\n• Generate analytics and comprehensive reports\n• Bulk operations for efficient workflow management\n• Real-time integration with Adobe Sign agreements\n\n🆕 KEY FEATURES:\n• Single endpoint for complete document workflow\n• Auto-extract recipients from JSON template data\n• Process template variables in DOCX files\n• Real-time Adobe Sign integration\n• Generate and store signing URLs\n• Enhanced error handling and logging\n• Rate limit protection\n• Webhook support for status updates\n• MongoDB Atlas database integration\n• Comprehensive transaction analytics\n\n⚠️ IMPORTANT: Signing URLs change after each signature in multi-recipient workflows. Always fetch fresh URLs before embedding.\n\n📧 REMINDER SYSTEM:\nThe API includes reminder functionality for unsigned recipients. Adobe Sign's native reminder API may have limitations, but the system provides both Adobe Sign API reminders and email reminders for reliability.\n\n🔔 WEBHOOK INTEGRATION:\nSupports Adobe Sign webhooks for real-time status updates. Webhooks automatically update signature status and timestamps when documents are signed.\n\n💾 DATABASE: \n✅ MongoDB Atlas connection established and working\n✅ Real transaction data persistence\n✅ 6 collections with live data\n✅ Enhanced error handling and fallbacks",
+    "name": "E-Signature API - Simplified API Key Management",
+    "description": "Complete API collection for E-Signature application with simplified API key management, template processing, Adobe Sign integration, and comprehensive workflow management.\n\n🔑 **SIMPLIFIED API KEY AUTHENTICATION:**\n• Admin-only API key management - no organization complexity\n• Generate admin key with `node generate-api-keys.js`\n• Create keys for different people/products using admin key\n• Built-in key rotation, expiration, and permission management\n\n� **API KEY MANAGEMENT FEATURES:**\n• ✅ Create API Key - Generate keys for users/products\n• ✅ List All Keys - View and filter all API keys\n• ✅ Rotate Keys - Generate new key values for security\n• ✅ Update Keys - Modify permissions and properties\n• ✅ Delete Keys - Deactivate unused keys\n• ✅ Key Statistics - Monitor usage and performance\n\n🚀 **UNIFIED DOCUMENT WORKFLOW:**\n• Single endpoint for upload, preparation, and sending\n• Auto-extract recipients from JSON template data\n• Process template variables in DOCX files\n• Real-time Adobe Sign integration\n• Generate and store signing URLs\n\n🔄 **TRANSACTION MANAGEMENT:**\n• Complete transaction tracking system\n• Monitor participant status and progress\n• Send automated reminders\n• Generate analytics and reports\n• Bulk operations support\n\n🔔 **WEBHOOK INTEGRATION:**\n• Real-time status updates from Adobe Sign\n• Automatic signature timestamp recording\n• Support for multiple webhook events\n\n💾 **DATABASE:**\n✅ MongoDB Atlas integration\n✅ Persistent data storage\n✅ Enhanced error handling\n✅ Simplified schema without organization complexity",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -11,8 +11,18 @@
     },
     {
       "key": "apiKey",
-      "value": "ak_ded1dfb5_ded1dfb5e1fd5db02c9bc68e4c7407b08ce367f675f9bf0a99acf8d067908c71",
-      "description": "API Key for authentication - This is a working test key"
+      "value": "",
+      "description": "Admin API Key for authentication - Generate using node generate-api-keys.js"
+    },
+    {
+      "key": "newApiKey",
+      "value": "",
+      "description": "Newly created API key for testing"
+    },
+    {
+      "key": "testKeyId",
+      "value": "",
+      "description": "Key ID for testing API key operations"
     },
     {
       "key": "documentId",
@@ -127,7 +137,7 @@
     },
     {
       "name": "API Key Management",
-      "description": "🔑 **API KEY AUTHENTICATION**\n\nThis system uses API Key authentication exclusively. All endpoints require an API key.\n\n📋 **How to get an API key:**\n1. Run `node generate-api-keys.js` in your project directory\n2. Use the generated API key in the `X-API-Key` header\n3. Set the API key in the collection variable `{{apiKey}}`\n\n✅ **Authentication Methods:**\n• Header: `X-API-Key: your_api_key`\n• Authorization Header: `Authorization: Bearer your_api_key`\n• Query Parameter: `?api_key=your_api_key`\n\n⚠️ **Important:** Keep your API keys secure and never commit them to version control.",
+      "description": "🔑 **API KEY AUTHENTICATION**\n\nThis system uses API Key authentication exclusively. All endpoints require an API key.\n\n📋 **How to get an API key:**\n1. Run `node generate-api-keys.js` in your project directory to generate an admin key\n2. Use the admin API key to create additional keys for different people and products\n3. Set the API key in the collection variable `{{apiKey}}`\n\n✅ **Authentication Methods:**\n• Header: `X-API-Key: your_api_key`\n• Authorization Header: `Authorization: Bearer your_api_key`\n• Query Parameter: `?api_key=your_api_key`\n\n⚠️ **Important:** \n• Keep your API keys secure and never commit them to version control\n• Only admin API keys can manage other API keys\n• Rotate keys regularly for security",
       "item": [
         {
           "name": "Create API Key",
@@ -140,12 +150,13 @@
                   "    const response = pm.response.json();",
                   "    if (response.data && response.data.apiKey) {",
                   "        console.log('✅ API Key created successfully');",
-                  "        console.log('🔑 API Key:', response.data.apiKey.key);",
-                  "        console.log('📋 Name:', response.data.apiKey.name);",
-                  "        console.log('🔐 Permissions:', response.data.apiKey.permissions.join(', '));",
+                  "        console.log('🔑 API Key:', response.data.apiKey);",
+                  "        console.log('📋 Name:', response.data.name);",
+                  "        console.log('👤 Assigned To:', response.data.assignedTo);",
+                  "        console.log('🔐 Permissions:', response.data.permissions.join(', '));",
                   "        ",
-                  "        // Save the API key to collection variable",
-                  "        pm.collectionVariables.set('apiKey', response.data.apiKey.key);",
+                  "        // Save the API key to collection variable for testing",
+                  "        pm.collectionVariables.set('newApiKey', response.data.apiKey);",
                   "    }",
                   "} else {",
                   "    console.log('❌ Failed to create API key:', pm.response.json().message);",
@@ -169,7 +180,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"My Application Key\",\n  \"description\": \"API key for document management\",\n  \"permissions\": [\"documents:read\", \"documents:write\", \"documents:send\"]\n}",
+              "raw": "{\n  \"name\": \"Document Manager Key\",\n  \"description\": \"API key for document management operations\",\n  \"assignedTo\": \"John Smith - Sales Team\",\n  \"permissions\": [\"documents:read\", \"documents:write\", \"documents:send\"],\n  \"environment\": \"production\",\n  \"expiresIn\": \"365d\",\n  \"rateLimit\": {\n    \"requestsPerMinute\": 100,\n    \"requestsPerHour\": 1000\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -177,40 +188,35 @@
               }
             },
             "url": "{{baseUrl}}/api/auth/api-keys",
-            "description": "Create a new API key with specific permissions. Requires admin API key."
+            "description": "**Create a new API key** (Admin only)\n\nCreate API keys for different people or products with specific permissions.\n\n✅ **Required Fields:**\n• `name` - Descriptive name for the API key\n\n📋 **Optional Fields:**\n• `description` - Purpose of the API key\n• `assignedTo` - Person or product this key is for\n• `permissions` - Array of permissions\n• `environment` - development, staging, or production\n• `expiresIn` - Expiration time (e.g., \"30d\", \"1y\")\n• `rateLimit` - Request rate limits\n\n⚠️ **Admin Access Required:** Only users with admin API keys can create new keys."
           }
         },
         {
-          "name": "List API Keys",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-API-Key",
-                "value": "{{apiKey}}",
-                "description": "Admin API key required"
-              }
-            ],
-            "url": "{{baseUrl}}/api/auth/api-keys",
-            "description": "List all API keys (admin only)"
-          }
-        },
-        {
-          "name": "Test API Key Authentication",
+          "name": "List All API Keys",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 200) {",
-                  "    console.log('✅ API Key authentication successful');",
                   "    const response = pm.response.json();",
-                  "    if (response.data && response.data.documents) {",
-                  "        console.log('📄 Documents accessible:', response.data.documents.length);",
+                  "    if (response.data && response.data.apiKeys) {",
+                  "        console.log('✅ API Keys retrieved successfully');",
+                  "        console.log('📊 Total Keys:', response.data.pagination.totalItems);",
+                  "        console.log('📄 Page:', response.data.pagination.currentPage);",
+                  "        console.log('');",
+                  "        console.log('📋 API Keys:');",
+                  "        response.data.apiKeys.forEach((key, index) => {",
+                  "            console.log(`${index + 1}. ${key.name}`);",
+                  "            console.log(`   👤 Assigned To: ${key.assignedTo || 'Not specified'}`);",
+                  "            console.log(`   🔐 Permissions: ${key.permissions.join(', ')}`);",
+                  "            console.log(`   📊 Status: ${key.isActive ? 'Active' : 'Inactive'}`);",
+                  "            console.log(`   🕐 Last Used: ${key.lastUsed ? new Date(key.lastUsed).toLocaleDateString() : 'Never'}`);",
+                  "            console.log('');",
+                  "        });",
                   "    }",
                   "} else {",
-                  "    console.log('❌ API Key authentication failed');",
-                  "    console.log('🔍 Check if your API key is valid and has the required permissions');",
+                  "    console.log('❌ Failed to retrieve API keys:', pm.response.json().message);",
                   "}"
                 ]
               }
@@ -222,11 +228,279 @@
               {
                 "key": "X-API-Key",
                 "value": "{{apiKey}}",
-                "description": "Your API key for authentication"
+                "description": "Admin API key required"
               }
             ],
-            "url": "{{baseUrl}}/api/documents",
-            "description": "Test API key authentication by fetching documents"
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/api-keys?page=1&limit=10&active=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "api-keys"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Items per page"
+                },
+                {
+                  "key": "active",
+                  "value": "true",
+                  "description": "Filter by active status"
+                },
+                {
+                  "key": "assignedTo",
+                  "value": "",
+                  "description": "Filter by assigned person/product",
+                  "disabled": true
+                },
+                {
+                  "key": "environment",
+                  "value": "",
+                  "description": "Filter by environment",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "**Retrieve all API keys** (Admin only)\n\nList all API keys with filtering and pagination options.\n\n🔍 **Query Parameters:**\n• `page` - Page number (default: 1)\n• `limit` - Items per page (default: 10)\n• `active` - Filter by active status\n• `assignedTo` - Filter by assigned person/product\n• `environment` - Filter by environment\n• `search` - Search in name, keyId, or assignedTo\n\n⚠️ **Admin Access Required:** Only admin API keys can view all keys."
+          }
+        },
+        {
+          "name": "Get API Key Details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.apiKey) {",
+                  "        const key = response.data.apiKey;",
+                  "        console.log('✅ API Key details retrieved successfully');",
+                  "        console.log('📋 Name:', key.name);",
+                  "        console.log('🆔 Key ID:', key.keyId);",
+                  "        console.log('👤 Assigned To:', key.assignedTo || 'Not specified');",
+                  "        console.log('📝 Description:', key.description || 'No description');",
+                  "        console.log('🔐 Permissions:', key.permissions.join(', '));",
+                  "        console.log('🌍 Environment:', key.environment);",
+                  "        console.log('📊 Status:', key.isActive ? 'Active' : 'Inactive');",
+                  "        console.log('🕐 Created:', new Date(key.createdAt).toLocaleDateString());",
+                  "        console.log('📈 Usage Count:', key.usageCount || 0);",
+                  "        if (key.lastUsed) {",
+                  "            console.log('⏰ Last Used:', new Date(key.lastUsed).toLocaleString());",
+                  "        }",
+                  "        if (key.expiresAt) {",
+                  "            console.log('⚠️ Expires:', new Date(key.expiresAt).toLocaleDateString());",
+                  "        }",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to retrieve API key details:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Admin API key required"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/api-keys/{{testKeyId}}",
+            "description": "**Get detailed information about a specific API key** (Admin only)\n\n📋 **Returns:**\n• Key metadata and configuration\n• Usage statistics\n• Permission and scope details\n• Rate limit settings\n• Expiration information\n\n⚠️ **Note:** The actual API key value is never returned for security reasons."
+          }
+        },
+        {
+          "name": "Rotate API Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.apiKey) {",
+                  "        console.log('✅ API Key rotated successfully');",
+                  "        console.log('🔑 New API Key:', response.data.apiKey);",
+                  "        console.log('🆔 Key ID:', response.data.keyId);",
+                  "        console.log('📋 Name:', response.data.name);",
+                  "        console.log('👤 Assigned To:', response.data.assignedTo);",
+                  "        console.log('🔄 Rotated At:', new Date(response.data.rotatedAt).toLocaleString());",
+                  "        console.log('');",
+                  "        console.log('⚠️ IMPORTANT:');",
+                  "        console.log('• The old API key is now invalid');",
+                  "        console.log('• Update all applications using this key');",
+                  "        console.log('• This is the only time the new key will be shown');",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to rotate API key:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Admin API key required"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/api-keys/{{testKeyId}}/rotate",
+            "description": "**Rotate an API key** (Admin only)\n\nGenerate a new API key value while preserving all other key properties.\n\n✅ **Use Cases:**\n• Key may have been compromised\n• Regular security rotation\n• Key is expiring soon\n\n🔄 **What happens:**\n• New API key value is generated\n• All metadata and permissions remain the same\n• Old key becomes invalid immediately\n• Rotation is logged for audit purposes\n\n⚠️ **Important:** Update all applications using the old key immediately."
+          }
+        },
+        {
+          "name": "Update API Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.apiKey) {",
+                  "        console.log('✅ API Key updated successfully');",
+                  "        console.log('📋 Name:', response.data.apiKey.name);",
+                  "        console.log('� Assigned To:', response.data.apiKey.assignedTo);",
+                  "        console.log('🔐 Permissions:', response.data.apiKey.permissions.join(', '));",
+                  "        console.log('📊 Status:', response.data.apiKey.isActive ? 'Active' : 'Inactive');",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to update API key:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Admin API key required"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Document Manager Key\",\n  \"description\": \"Updated API key for enhanced document management\",\n  \"assignedTo\": \"Jane Smith - Marketing Team\",\n  \"permissions\": [\"documents:read\", \"documents:write\", \"documents:send\", \"documents:status\"],\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/auth/api-keys/{{testKeyId}}",
+            "description": "**Update API key properties** (Admin only)\n\n📝 **Updatable Fields:**\n• `name` - Key name\n• `description` - Key description\n• `assignedTo` - Person or product assigned\n• `permissions` - Array of permissions\n• `isActive` - Active/inactive status\n• `allowedIPs` - IP restrictions\n• `rateLimit` - Rate limiting settings\n• `metadata` - Additional metadata\n\n⚠️ **Note:** The actual API key value cannot be changed - use rotate for that."
+          }
+        },
+        {
+          "name": "Delete API Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('✅ API Key deleted successfully');",
+                  "    console.log('🗑️ Key ID:', response.data.keyId);",
+                  "    console.log('📋 The API key has been deactivated and is no longer valid');",
+                  "    console.log('🔍 The key data is preserved for audit purposes');",
+                  "} else {",
+                  "    console.log('❌ Failed to delete API key:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Admin API key required"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/api-keys/{{testKeyId}}",
+            "description": "**Delete an API key** (Admin only)\n\nDeactivate an API key and make it unusable.\n\n🗑️ **What happens:**\n• API key is marked as inactive\n• Key becomes immediately unusable\n• Key data is preserved for audit trails\n• Deletion is logged with timestamp\n\n⚠️ **Use Cases:**\n• Employee leaves the company\n• Product is discontinued\n• Key is no longer needed\n• Security incident requires key revocation"
+          }
+        },
+        {
+          "name": "Get API Key Statistics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.data && response.data.stats) {",
+                  "        const stats = response.data.stats;",
+                  "        console.log('✅ API Key statistics retrieved successfully');",
+                  "        console.log('');",
+                  "        console.log('📊 USAGE STATISTICS:');",
+                  "        console.log('🆔 Key ID:', stats.keyId);",
+                  "        console.log('📋 Name:', stats.name);",
+                  "        console.log('👤 Assigned To:', stats.assignedTo || 'Not specified');",
+                  "        console.log('📈 Total Usage:', stats.usageCount || 0);",
+                  "        console.log('⏰ Last Used:', stats.lastUsed ? new Date(stats.lastUsed).toLocaleString() : 'Never');",
+                  "        console.log('🕐 Created:', new Date(stats.createdAt).toLocaleDateString());",
+                  "        console.log('📊 Status:', stats.isActive ? 'Active' : 'Inactive');",
+                  "        console.log('');",
+                  "        console.log('🔐 PERMISSIONS:');",
+                  "        stats.permissions.forEach(perm => console.log('• ' + perm));",
+                  "        console.log('');",
+                  "        console.log('⚡ RATE LIMITS:');",
+                  "        console.log('• Per Minute:', stats.rateLimit.requestsPerMinute);",
+                  "        console.log('• Per Hour:', stats.rateLimit.requestsPerHour);",
+                  "        if (stats.expiresAt) {",
+                  "            console.log('');",
+                  "            console.log('⚠️ EXPIRATION:');",
+                  "            console.log('• Expires:', new Date(stats.expiresAt).toLocaleDateString());",
+                  "            if (stats.daysUntilExpiry !== null) {",
+                  "                console.log('• Days Until Expiry:', stats.daysUntilExpiry);",
+                  "            }",
+                  "        }",
+                  "    }",
+                  "} else {",
+                  "    console.log('❌ Failed to retrieve API key statistics:', pm.response.json().message);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Admin API key required"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/api-keys/{{testKeyId}}/stats",
+            "description": "**Get detailed statistics for an API key** (Admin only)\n\n📊 **Statistics Include:**\n• Usage count and patterns\n• Last usage timestamp\n• Rate limit configuration\n• Permission analysis\n• Expiration information\n• Activity timeline\n\n💡 **Use Cases:**\n• Monitor API key usage\n• Identify inactive keys\n• Plan for key rotation\n• Audit access patterns\n• Capacity planning"
           }
         }
       ]
