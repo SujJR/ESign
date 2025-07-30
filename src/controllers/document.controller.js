@@ -34,16 +34,10 @@ const urlUtils = require('../utils/urlUtils');
  */
 const extractRecipientsFromTemplateData = (templateData) => {
   const recipients = [];
-  const emailSet = new Set(); // Track emails to prevent duplicates    // Add debug logging to see what template data we're working with
-    OrganizationLogger.info('Template data structure:', req, JSON.stringify(templateData, null, 2));
-    
-    // Add debug logging to see what template data we're working with
-    logger.info('Template data structure:', {
-      organizationId: req.apiKey?.organization?.id,
-      organizationName: req.apiKey?.organization?.name,
-      apiKeyId: req.apiKey?.keyId,
-      data: JSON.stringify(templateData, null, 2)
-    });
+  const emailSet = new Set(); // Track emails to prevent duplicates
+  
+  // Add debug logging to see what template data we're working with
+  logger.info('Template data structure:', JSON.stringify(templateData, null, 2));
   
   // PRIORITY 1: Check for explicit recipients array first
   if (templateData.recipients && Array.isArray(templateData.recipients) && templateData.recipients.length > 0) {
@@ -247,13 +241,8 @@ exports.getDocuments = async (req, res, next) => {
   try {
     const { page = 1, limit = 10, status, search } = req.query;
     
-    // Build query based on organization access
+    // Build query for documents
     const query = {};
-    
-    // Filter by organization if API key is organization-specific
-    if (req.apiKey && req.apiKey.organization && !req.apiKey.permissions.includes('admin:all')) {
-      query.organization = req.apiKey.organization.id;
-    }
     
     // Add status filter if provided
     if (status) {
@@ -270,7 +259,6 @@ exports.getDocuments = async (req, res, next) => {
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const documents = await Document.find(query)
-      .populate('organization', 'name slug')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -310,13 +298,7 @@ exports.getDocument = async (req, res, next) => {
   try {
     const query = { _id: req.params.id };
     
-    // Filter by organization if API key is organization-specific
-    if (req.apiKey && req.apiKey.organization && !req.apiKey.permissions.includes('admin:all')) {
-      query.organization = req.apiKey.organization.id;
-    }
-    
-    const document = await Document.findOne(query)
-      .populate('organization', 'name slug');
+    const document = await Document.findOne(query);
     
     if (!document) {
       await OrganizationLogger.warn('Document not found or access denied', req, {
@@ -1905,43 +1887,29 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
     documentData.pageCount = pageCount;
     documentData.status = 'uploaded';
     
-    // Add organization and API key tracking
+    // Add API key tracking (simplified system without organizations)
     if (req.apiKey) {
-      documentData.organization = req.apiKey.organization.id;
       documentData.apiKeyId = req.apiKey.keyId;
+      // Note: organization field is set to null in simplified system
+      documentData.organization = null;
     }
     
     // Create document record
     const document = new Document(documentData);
     await document.save();
 
-    // Increment organization document usage
-    if (req.apiKey && req.apiKey.organization) {
-      try {
-        // This will be handled asynchronously to not block the response
-        const Organization = require('../models/organization.model');
-        const org = await Organization.findById(req.apiKey.organization.id);
-        if (org) {
-          await org.incrementUsage('documents', 1);
-          await OrganizationLogger.info(`Document uploaded successfully: ${document.originalName}`, req, {
-            documentId: document._id,
-            action: 'document_upload',
-            fileSize: document.fileSize,
-            mimeType: document.mimeType
-          });
-          logger.debug(`Incremented document usage for organization: ${org.name}`);
-        }
-      } catch (usageError) {
-        logger.error(`Failed to update organization usage: ${usageError.message}`);
-        // Don't fail the request if usage tracking fails
-      }
-    }
+    logger.info(`Document uploaded successfully: ${document.originalName}`, {
+      documentId: document._id,
+      action: 'document_upload',
+      fileSize: document.fileSize,
+      mimeType: document.mimeType
+    });
     
     // Debug: Log the saved document's template data
     logger.info('Document saved with templateData:', JSON.stringify(document.templateData, null, 2));
     logger.info('DocumentData templateData before save:', JSON.stringify(documentData.templateData, null, 2));
     
-    await OrganizationLogger.info(`Document processing completed: ${document.originalName}`, req, {
+    logger.info(`Document processing completed: ${document.originalName}`, {
       documentId: document._id,
       action: 'document_processing_complete',
       status: document.status
@@ -1949,6 +1917,29 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
     
     // Step 2: Prepare for signature (reuse prepareForSignature logic)
     let { recipients, signatureFieldMapping, signingFlow, defaultRecipients } = req.body;
+    
+    // Parse JSON strings if needed (for form data submissions)
+    if (typeof recipients === 'string') {
+      try {
+        recipients = JSON.parse(recipients);
+      } catch (e) {
+        return next(new ApiError(400, 'Invalid recipients JSON format'));
+      }
+    }
+    if (typeof signatureFieldMapping === 'string') {
+      try {
+        signatureFieldMapping = JSON.parse(signatureFieldMapping);
+      } catch (e) {
+        return next(new ApiError(400, 'Invalid signatureFieldMapping JSON format'));
+      }
+    }
+    if (typeof defaultRecipients === 'string') {
+      try {
+        defaultRecipients = JSON.parse(defaultRecipients);
+      } catch (e) {
+        return next(new ApiError(400, 'Invalid defaultRecipients JSON format'));
+      }
+    }
     
     // DEBUG: Log what we have at this point
     logger.info('=== RECIPIENT EXTRACTION DEBUG ===');

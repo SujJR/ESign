@@ -199,18 +199,24 @@ exports.requireScopes = (...scopes) => {
       return next(new ApiError(401, 'Authentication required.'));
     }
     
+    // Handle both calling patterns: requireScopes('a', 'b') and requireScopes(['a', 'b'])
+    const requiredScopes = Array.isArray(scopes[0]) ? scopes[0] : scopes;
+    
     // Admin keys have all scopes
-    if (req.apiKey.scopes.includes('full_access')) {
+    if (req.apiKey.scopes && req.apiKey.scopes.includes('full_access')) {
       return next();
     }
     
     // Check if API key has any of the required scopes
-    const hasScope = scopes.some(scope => 
-      req.apiKey.scopes.includes(scope)
+    const hasScope = requiredScopes.some(scope => 
+      req.apiKey.scopes && req.apiKey.scopes.includes(scope)
     );
     
     if (!hasScope) {
-      return next(new ApiError(403, `Insufficient scope. Required: ${scopes.join(' or ')}`));
+      console.log('🐛 DEBUG - Scope check failed:');
+      console.log('  Required scopes:', requiredScopes);
+      console.log('  API key scopes:', req.apiKey.scopes);
+      return next(new ApiError(403, `Insufficient scope. Required: ${requiredScopes.join(' or ')}`));
     }
     
     next();
