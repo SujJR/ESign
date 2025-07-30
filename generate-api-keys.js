@@ -36,6 +36,7 @@ const generateApiKey = async (name, permissions, options = {}) => {
       description: options.description || '',
       assignedTo: options.assignedTo || '',
       permissions,
+      scopes: options.scopes || [], // Add scopes support
       expiresAt: options.expiresAt || null,
       allowedIPs: options.allowedIPs || [],
       rateLimit: {
@@ -99,6 +100,7 @@ const generateInitialKeys = async () => {
       {
         assignedTo: 'System Administrator',
         description: 'Full admin access API key for system management',
+        scopes: ['full_access'],
         requestsPerMinute: 500,
         requestsPerHour: 5000,
         metadata: {
@@ -115,6 +117,7 @@ const generateInitialKeys = async () => {
       {
         assignedTo: 'Document Manager',
         description: 'API key for document operations and e-signature workflows',
+        scopes: ['document_management', 'signature_workflow'],
         expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
         metadata: {
           description: 'Document management operations',

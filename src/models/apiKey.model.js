@@ -141,11 +141,18 @@ apiKeySchema.index({ assignedTo: 1 });
 
 // Static method to generate a new API key
 apiKeySchema.statics.generateApiKey = function(suffix = 'default') {
+  // Sanitize suffix to create URL-safe identifier
+  const sanitizedSuffix = suffix
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-')  // Replace non-alphanumeric with hyphens
+    .replace(/-+/g, '-')         // Replace multiple hyphens with single
+    .replace(/^-|-$/g, '');      // Remove leading/trailing hyphens
+  
   // Generate a random API key
   const apiKey = crypto.randomBytes(32).toString('hex');
   const prefix = apiKey.substring(0, 8);
-  // Include suffix in keyId for better identification
-  const keyId = `ak_${suffix}_${prefix}`;
+  // Include sanitized suffix in keyId for better identification
+  const keyId = `ak_${sanitizedSuffix}_${prefix}`;
   
   return {
     apiKey: `${keyId}_${apiKey}`,

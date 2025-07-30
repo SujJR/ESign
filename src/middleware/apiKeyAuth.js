@@ -52,9 +52,10 @@ exports.authenticateApiKey = async (req, res, next) => {
     }
     
     // Extract keyId from the API key
-    const keyIdMatch = apiKey.match(/^(ak_[a-z0-9-]+_[a-f0-9]{8})_/);
+    // Expected format: ak_{sanitized-name}_{8-char-hex}_{64-char-hex}
+    const keyIdMatch = apiKey.match(/^(ak_[a-z0-9-]+_[a-f0-9]{8})_[a-f0-9]{64}$/);
     if (!keyIdMatch) {
-      return next(new ApiError(401, 'Invalid API key format.'));
+      return next(new ApiError(401, 'Invalid API key format. Expected format: ak_{name}_{prefix}_{key}'));
     }
     
     const keyId = keyIdMatch[1];
