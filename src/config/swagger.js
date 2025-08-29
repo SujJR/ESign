@@ -209,6 +209,52 @@ This API uses **API Key authentication exclusively**. All endpoints require a va
               }
             }
           }
+        },
+        UploadForUrlsResponse: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean', example: true },
+            message: { type: 'string', example: 'Document uploaded and signing URLs generated successfully (no emails sent)' },
+            statusCode: { type: 'number', example: 201 },
+            data: {
+              type: 'object',
+              properties: {
+                document: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', description: 'Document ID' },
+                    originalName: { type: 'string', description: 'Original filename' },
+                    status: { type: 'string', example: 'prepared_for_signature' },
+                    adobeAgreementId: { type: 'string', description: 'Adobe Sign agreement ID' },
+                    recipients: { type: 'integer', description: 'Number of recipients' },
+                    templateVariablesProcessed: { type: 'integer', description: 'Number of template variables processed' },
+                    createdAt: { type: 'string', format: 'date-time' }
+                  }
+                },
+                adobeAgreementId: { type: 'string', description: 'Adobe Sign agreement ID' },
+                method: { type: 'string', description: 'Adobe Sign method used', example: 'text-tags' },
+                emailNotificationsDisabled: { type: 'boolean', example: true },
+                uploadMethod: { type: 'string', description: 'Upload method used', example: 'file_upload' },
+                templateVariablesProcessed: { type: 'integer', description: 'Number of template variables processed' },
+                signingUrls: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      email: { type: 'string', format: 'email', description: 'Recipient email' },
+                      name: { type: 'string', description: 'Recipient name' },
+                      title: { type: 'string', description: 'Recipient title' },
+                      signingUrl: { type: 'string', format: 'uri', nullable: true, description: 'Adobe Sign signing URL' },
+                      status: { type: 'string', description: 'URL generation status', example: 'url_generated' },
+                      errorMessage: { type: 'string', nullable: true, description: 'Error message if URL generation failed' }
+                    }
+                  }
+                },
+                successfulUrls: { type: 'integer', description: 'Number of successfully generated URLs' },
+                totalRecipients: { type: 'integer', description: 'Total number of recipients' }
+              }
+            }
+          }
         }
       },
       responses: {

@@ -595,6 +595,123 @@
           "description": "# 🚀 UNIFIED ENDPOINT - All Three Upload Methods\n\nThis single endpoint `/api/documents/upload-and-send` supports **all three upload methods** in one unified interface. All methods perform the same operations:\n\n1. **Upload/Download** the document\n2. **Process** template variables\n3. **Prepare** for signature\n4. **Send** to Adobe Sign\n5. **Store** signing URLs\n\n**Choose the method that best fits your workflow:**\n\n## 📄 **Method 1: File Upload + JSON File**\n- Traditional file upload from computer\n- Perfect for manual workflows\n- Uses multipart/form-data\n\n## 🌐 **Method 2: Document URL + JSON Files**\n- Download document from URL\n- Upload multiple JSON files (auto-combined)\n- Great for distributed data sources\n\n## 💾 **Method 3: Document URL + Inline JSON**\n- Download document from URL\n- Provide JSON data in request body\n- Perfect for API integrations\n\n**All methods produce the same response format and perform the complete workflow in one call!**"
         },
         {
+          "name": "Upload for Signing URLs (No Emails)",
+          "item": [
+            {
+              "name": "Method 1: File Upload + JSON File",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    const response = pm.response.json();",
+                      "    if (response.data && response.data.document) {",
+                      "        pm.collectionVariables.set('documentId', response.data.document.id);",
+                      "        console.log('✅ Upload for URLs Method 1: File upload completed successfully');",
+                      "        console.log('📄 Document ID:', response.data.document.id);",
+                      "        console.log('🔗 Signing URLs Generated:', response.data.successfulUrls);",
+                      "        console.log('📧 Email Notifications:', response.data.emailNotificationsDisabled ? 'DISABLED' : 'ENABLED');",
+                      "        ",
+                      "        // Log signing URLs for easy access",
+                      "        if (response.data.signingUrls && response.data.signingUrls.length > 0) {",
+                      "            console.log('🔗 Generated Signing URLs:');",
+                      "            response.data.signingUrls.forEach((recipient, index) => {",
+                      "                console.log(`${index + 1}. ${recipient.name} (${recipient.email}): ${recipient.signingUrl ? 'Generated' : 'Failed'}`);",
+                      "                if (recipient.signingUrl) {",
+                      "                    console.log(`   URL: ${recipient.signingUrl}`);",
+                      "                }",
+                      "            });",
+                      "        }",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "X-API-Key", "value": "{{apiKey}}", "description": "API Key for authentication" },
+                  { "key": "Content-Type", "value": "multipart/form-data" }
+                ],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    { "key": "document", "type": "file", "src": [], "description": "📄 Upload your DOCX, PDF, or DOC file" },
+                    { "key": "data", "type": "file", "src": [], "description": "📄 Upload JSON file with template data and recipient info" },
+                    { "key": "signingFlow", "value": "SEQUENTIAL", "type": "text", "description": "📋 Optional: SEQUENTIAL or PARALLEL signing flow" }
+                  ]
+                },
+                "url": "{{baseUrl}}/api/documents/upload-for-urls",
+                "description": "**Method 1: File Upload + JSON Data File (No Emails)**\n\nUpload document files directly and get signing URLs without sending any emails.\n\n📄 **How to use:**\n1. Upload your document file (PDF, DOCX, DOC)\n2. Upload a JSON file containing template data and recipients\n3. Click Send\n4. Get signing URLs in response - NO emails sent\n\n✅ **Perfect for:** Custom email workflows and notification control"
+              }
+            },
+            {
+              "name": "Method 2: Document URL + Inline JSON",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    const response = pm.response.json();",
+                      "    if (response.data && response.data.document) {",
+                      "        pm.collectionVariables.set('documentId', response.data.document.id);",
+                      "        console.log('✅ Upload for URLs Method 2: URL + inline JSON completed successfully');",
+                      "        console.log('📄 Document ID:', response.data.document.id);",
+                      "        console.log('🔗 Signing URLs Generated:', response.data.successfulUrls);",
+                      "        console.log('📧 Email Notifications:', response.data.emailNotificationsDisabled ? 'DISABLED' : 'ENABLED');",
+                      "        ",
+                      "        // Store first signing URL for testing",
+                      "        if (response.data.signingUrls && response.data.signingUrls.length > 0 && response.data.signingUrls[0].signingUrl) {",
+                      "            pm.collectionVariables.set('signingUrl', response.data.signingUrls[0].signingUrl);",
+                      "            console.log('🔗 First signing URL stored for testing');",
+                      "        }",
+                      "        ",
+                      "        // Log all signing URLs",
+                      "        if (response.data.signingUrls && response.data.signingUrls.length > 0) {",
+                      "            console.log('🔗 All Generated Signing URLs:');",
+                      "            response.data.signingUrls.forEach((recipient, index) => {",
+                      "                console.log(`${index + 1}. ${recipient.name} (${recipient.email}):`);",
+                      "                console.log(`   Status: ${recipient.status}`);",
+                      "                if (recipient.signingUrl) {",
+                      "                    console.log(`   URL: ${recipient.signingUrl}`);",
+                      "                } else if (recipient.errorMessage) {",
+                      "                    console.log(`   Error: ${recipient.errorMessage}`);",
+                      "                }",
+                      "                console.log('');",
+                      "            });",
+                      "        }",
+                      "    }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "X-API-Key", "value": "{{apiKey}}", "description": "API Key for authentication" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"documentUrl\": \"https://docs.google.com/document/d/1oC0q7y8_FbJmckQiU73lun4W5k1E4qmz/edit?usp=sharing&ouid=117769269345574843932&rtpof=true&sd=true\",\n  \"jsonData\": {\n    \"agreementDate\": \"August 27, 2025\",\n    \"agreementId\": \"AGR-2025-0827\",\n    \"clientName\": \"Acme Corporation\",\n    \"clientAddress\": \"123 Client Street, Business City, BC 12345\",\n    \"clientEmail\": \"contact@acmecorp.com\",\n    \"clientPhone\": \"(555) 123-4567\",\n    \"clientTitle\": \"Chief Executive Officer\",\n    \"companyName\": \"Professional Services LLC\",\n    \"companyAddress\": \"456 Provider Avenue, Service City, SC 54321\",\n    \"companyEmail\": \"info@proservices.com\",\n    \"companyPhone\": \"(555) 987-6543\",\n    \"providerName\": \"Jane Provider\",\n    \"providerTitle\": \"Managing Director\",\n    \"service1\": \"Strategic consulting for business development\",\n    \"service2\": \"Market analysis and competitive positioning\",\n    \"service3\": \"Implementation support and project management\",\n    \"startDate\": \"September 1, 2025\",\n    \"endDate\": \"March 1, 2026\",\n    \"totalFee\": \"25,000\",\n    \"paymentSchedule\": \"50% upfront, 25% at midpoint, 25% upon completion\",\n    \"paymentDue\": \"15\",\n    \"lateFeePercentage\": \"1.5\",\n    \"terminationNotice\": \"30\",\n    \"witnessName\": \"Sam Witness\",\n    \"recipients\": [\n      {\n        \"name\": \"Acme Corporation\",\n        \"email\": \"{{recipientEmail}}\",\n        \"title\": \"Client\"\n      },\n      {\n        \"name\": \"Jane Provider\",\n        \"email\": \"jane.provider@example.com\",\n        \"title\": \"Service Provider\"\n      },\n      {\n        \"name\": \"Sam Witness\",\n        \"email\": \"sam.witness@example.com\",\n        \"title\": \"Witness\"\n      }\n    ]\n  },\n  \"signingFlow\": \"SEQUENTIAL\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{baseUrl}}/api/documents/upload-for-urls",
+                "description": "**Method 2: Document URL + Inline JSON (No Emails)**\n\nDownload document from URL and get signing URLs without sending any emails.\n\n💾 **How to use:**\n1. Set Content-Type to application/json\n2. Provide documentUrl and jsonData in the request body\n3. Include recipients and template data in jsonData\n4. Click Send\n5. Get signing URLs in response - NO emails sent\n\n✅ **Perfect for:** API integrations with custom notification workflows"
+              }
+            }
+          ],
+          "description": "# 🔗 UPLOAD FOR SIGNING URLS (NO EMAILS)\n\nThis endpoint `/api/documents/upload-for-urls` provides the same document processing capabilities as `/upload-and-send` but **WITHOUT sending any email notifications**.\n\n## 🎯 **Key Differences:**\n\n| Feature | `/upload-and-send` | `/upload-for-urls` |\n|---------|-------------------|-------------------|\n| **Email Notifications** | ✅ Automatic | ❌ None sent |\n| **Signing URLs** | Generated & stored | Generated & returned |\n| **Document Status** | `sent_for_signature` | `prepared_for_signature` |\n| **Use Case** | Standard workflow | Custom workflow |\n\n## 🚀 **What this endpoint does:**\n\n1. **Upload/Download** the document\n2. **Process** template variables (DOCX files)\n3. **Prepare** for signature with Adobe Sign\n4. **Generate** signing URLs for all recipients\n5. **Return** URLs in response (NO emails sent)\n6. **Disable** all Adobe Sign notifications\n\n## 💡 **Perfect for:**\n\n- ✅ **Custom email templates** - Use your own branding\n- ✅ **Multi-language support** - Send localized notifications\n- ✅ **Delayed notifications** - Control timing\n- ✅ **Custom workflows** - Approval before sending\n- ✅ **Integration** - With your existing email system\n- ✅ **Analytics** - Track email engagement separately\n\n## 📧 **Next Steps After Getting URLs:**\n\n```javascript\n// Example: Send custom emails with the signing URLs\nresponse.data.signingUrls.forEach(recipient => {\n  if (recipient.signingUrl) {\n    sendCustomEmail({\n      to: recipient.email,\n      subject: `Please sign: ${documentName}`,\n      template: 'custom-signature-request',\n      data: {\n        recipientName: recipient.name,\n        signingUrl: recipient.signingUrl,\n        deadline: '7 days'\n      }\n    });\n  }\n});\n```\n\n⚠️ **Important:** Recipients will NOT receive any emails from Adobe Sign. You control all communication!"
+        },
+        {
           "name": "Get All Documents",
           "request": {
             "method": "GET",

@@ -956,6 +956,7 @@ exports.sendReminder = async (req, res, next) => {
                   if (!recipient.lastSigningUrlAccessed || latestAccessDate > recipient.lastSigningUrlAccessed) {
                     recipient.lastSigningUrlAccessed = latestAccessDate;
                     logger.info(`REMINDER: Updated lastSigningUrlAccessed for ${recipient.email}: ${recipient.lastSigningUrlAccessed}`);
+                    changesMade = true;
                   }
                 } else if (!recipient.lastSigningUrlAccessed) {
                   // Enhanced fallback for lastSigningUrlAccessed
@@ -1745,348 +1746,94 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
       return next(new ApiError(500, `Failed to analyze file: ${error.message}`));
     }
     
+    // Process document based on type
     if (fileExtension === '.pdf') {
-      // Only analyze if it's actually a PDF file
       if (fileInfo.isPdf) {
         try {
           const pdfInfo = await documentUtils.analyzePdf(filePath);
           pageCount = pdfInfo.pageCount;
           
-          // Analyze PDF for template variables and signature fields
-          try {
-            const analysis = await documentProcessor.analyzeDocumentForSignatureFields(filePath);
-            documentData.templateVariables = analysis.templateVariables;
-            documentData.documentAnalysis = analysis;
-            documentData.autoDetectedSignatureFields = (analysis.signatureFields || []).map(field => {
-              if (typeof field === 'object' && field.name) {
-                return {
-                  name: field.name,
-                  type: field.type.toLowerCase(),
-                  required: true,
-                  x: field.x,
-                  y: field.y,
-                  width: field.width,
-                  height: field.height,
-                  page: field.page,
-                  detected: true
-                };
-              } else {
-                return {
-                  name: field,
-                  type: 'signature',
-                  required: true
-                };
-              }
-            });
-            
-            // IMPORTANT: For PDF files with template variables, warn about formatting limitations
-            if (Object.keys(templateData).length > 0 && analysis.templateVariables.length > 0) {
-              logger.warn(`PDF has ${analysis.templateVariables.length} template variables and JSON data provided.`);
-              logger.warn('WARNING: PDF template processing uses text extraction which may lose formatting and alignment.');
-              logger.warn('For best results, use DOCX templates instead of PDF templates.');
-              logger.warn('Skipping PDF template processing to preserve formatting. Use DOCX format for template variable replacement.');
-              
-              // Store template variables for reference but don't process them to preserve formatting
-              documentData.skippedPdfProcessing = true;
-              documentData.formatPreservationNote = 'PDF template processing skipped to preserve formatting. Use DOCX format for template variables.';
-              
-              // DO NOT PROCESS PDF TEMPLATES - this causes "all in one line" formatting issues
-              // If user needs template variables in PDF, they should convert their template to DOCX format first
-            } else if (Object.keys(templateData).length > 0 && analysis.templateVariables.length === 0) {
-              logger.info('JSON data provided but no template variables found in PDF');
-            } else if (Object.keys(templateData).length === 0 && analysis.templateVariables.length > 0) {
-              logger.info(`PDF has ${analysis.templateVariables.length} template variables but no JSON data provided`);
-            }
-            
-          } catch (analysisError) {
-            logger.warn(`Could not analyze PDF for template variables: ${analysisError.message}`);
-          }
-        } catch (pdfError) {
-          logger.error(`Failed to analyze PDF: ${pdfError.message}`);
-          // Continue with document processing even if PDF analysis fails
-          pageCount = 1; // Default to 1 page
-        }
-      } else {
-        logger.warn(`File extension is .pdf but file doesn't have PDF header. File info:`, fileInfo);
-        // Treat as regular file, don't attempt PDF analysis
-      }
-    } else if (['.docx', '.doc'].includes(fileExtension)) {
-      // Process DOCX/DOC file with template data
-      try {
-        // First analyze the document
-        const analysis = await documentProcessor.analyzeDocumentForSignatureFields(filePath);
-        
-        // Process template with data if provided
-        if (Object.keys(templateData).length > 0) {
-          try {
-            // Use our specialized Adobe Sign tag handler to process the document
-            const processResult = await adobeSignTagHandler.processDocumentWithTags(filePath, templateData);
-            
-            // Update document data with paths and processing info
-            processedFilePath = processResult.processedFilePath;
-            finalPdfPath = processResult.pdfFilePath;
-            documentData.processedFilePath = processedFilePath;
-            documentData.pdfFilePath = finalPdfPath;
-            documentData.hasAdobeSignTags = processResult.hasAdobeSignTags;
-          } catch (processingError) {
-            logger.error(`Error processing document with tags: ${processingError.message}`);
-            return next(new ApiError(400, `Error processing document template: ${processingError.message}`));
-          }
-        } else {
-          // No template data, just convert the original document to PDF
-          finalPdfPath = await documentProcessor.convertDocxToPdf(filePath);
-          documentData.pdfFilePath = finalPdfPath;
-        }
-        
-        documentData.templateVariables = analysis.templateVariables;
-        documentData.documentAnalysis = analysis;
-        
-        // Analyze the converted PDF
-        try {
-          const pdfInfo = await documentUtils.analyzePdf(finalPdfPath);
-          pageCount = pdfInfo.pageCount;
-        } catch (pdfAnalysisError) {
-          logger.error(`Failed to analyze converted PDF: ${pdfAnalysisError.message}`);
-          // Default to 1 page if analysis fails
-          pageCount = 1;
-        }
-        
-        // Check if the document has Adobe Sign text tags and verify their format
-        if (documentData.autoDetectedSignatureFields && documentData.autoDetectedSignatureFields.length > 0) {
-          const verificationResult = verifyAdobeSignTextTags(documentData.autoDetectedSignatureFields);
-          if (verificationResult.hasTags) {
-            logger.info('Adobe Sign text tags detected in document');
-            
-            if (!verificationResult.correctFormat) {
-              logger.warn('Issues found with Adobe Sign text tags:');
-              verificationResult.issuesFound.forEach(issue => logger.warn(`- ${issue}`));
-              logger.warn('Recommendations:');
-              verificationResult.recommendations.forEach(rec => logger.warn(`- ${rec}`));
-              
-              // If there are issues, add a message to the response
-              documentData.textTagIssues = verificationResult.issuesFound;
-              documentData.textTagRecommendations = verificationResult.recommendations;
+          const analysis = await documentProcessor.analyzeDocumentForSignatureFields(filePath);
+          documentData.templateVariables = analysis.templateVariables;
+          documentData.documentAnalysis = analysis;
+          documentData.autoDetectedSignatureFields = (analysis.signatureFields || []).map(field => {
+            if (typeof field === 'object' && field.name) {
+              return {
+                name: field.name,
+                type: field.type.toLowerCase(),
+                required: true,
+                x: field.x,
+                y: field.y,
+                width: field.width,
+                height: field.height,
+                page: field.page,
+                detected: true
+              };
             } else {
-              logger.info('Adobe Sign text tags verification passed - signatures should appear at tag positions');
-            }
-            
-            documentData.hasAdobeSignTags = true;
-          }
-        }
-        
-        logger.info(`Document processed successfully. Found ${analysis.templateVariables.length} template variables`);
-      } catch (processingError) {
-        logger.error(`Error processing document: ${processingError.message}`);
-        return next(new ApiError(400, `Error processing document: ${processingError.message}`));
-      }
-    } else {
-      return next(new ApiError(400, 'Unsupported file format. Please upload PDF, DOCX, or DOC files.'));
-    }
-    
-    // Set page count and final status
-    documentData.pageCount = pageCount;
-    documentData.status = 'uploaded';
-    
-    // Add API key tracking (simplified system without organizations)
-    if (req.apiKey) {
-      documentData.apiKeyId = req.apiKey.keyId;
-      // Note: organization field is set to null in simplified system
-      documentData.organization = null;
-    }
-    
-    // Create document record
-    const document = new Document(documentData);
-    await document.save();
-
-    logger.info(`Document uploaded successfully: ${document.originalName}`, {
-      documentId: document._id,
-      action: 'document_upload',
-      fileSize: document.fileSize,
-      mimeType: document.mimeType
-    });
-    
-    // Debug: Log the saved document's template data
-    logger.info('Document saved with templateData:', JSON.stringify(document.templateData, null, 2));
-    logger.info('DocumentData templateData before save:', JSON.stringify(documentData.templateData, null, 2));
-    
-    logger.info(`Document processing completed: ${document.originalName}`, {
-      documentId: document._id,
-      action: 'document_processing_complete',
-      status: document.status
-    });
-    
-    // Step 2: Prepare for signature (reuse prepareForSignature logic)
-    let { recipients, signatureFieldMapping, signingFlow, defaultRecipients } = req.body;
-    
-    // Parse JSON strings if needed (for form data submissions)
-    if (typeof recipients === 'string') {
-      try {
-        recipients = JSON.parse(recipients);
-      } catch (e) {
-        return next(new ApiError(400, 'Invalid recipients JSON format'));
-      }
-    }
-    if (typeof signatureFieldMapping === 'string') {
-      try {
-        signatureFieldMapping = JSON.parse(signatureFieldMapping);
-      } catch (e) {
-        return next(new ApiError(400, 'Invalid signatureFieldMapping JSON format'));
-      }
-    }
-    if (typeof defaultRecipients === 'string') {
-      try {
-        defaultRecipients = JSON.parse(defaultRecipients);
-      } catch (e) {
-        return next(new ApiError(400, 'Invalid defaultRecipients JSON format'));
-      }
-    }
-    
-    // DEBUG: Log what we have at this point
-    logger.info('=== RECIPIENT EXTRACTION DEBUG ===');
-    
-    // Continue with rest of logic...
-    logger.info('===================================');
-    
-    // If no recipients provided, try to extract from JSON template data
-    if (!recipients || (Array.isArray(recipients) && recipients.length === 0)) {
-      // Use the templateData we already have in memory instead of from the saved document
-      const sourceTemplateData = templateData || document.templateData;
-      
-      if (sourceTemplateData) {
-        logger.info('No recipients provided, extracting from template data');
-        logger.info('Source template data keys:', Object.keys(sourceTemplateData));
-        logger.info('Source template data recipients:', sourceTemplateData.recipients);
-        recipients = extractRecipientsFromTemplateData(sourceTemplateData);
-        
-        if (!recipients || recipients.length === 0) {
-          // Try to use default recipients if provided
-          if (defaultRecipients && Array.isArray(defaultRecipients) && defaultRecipients.length > 0) {
-            logger.info('No recipients found in template data, using provided default recipients');
-            recipients = defaultRecipients;
-          } else {
-            logger.error('No recipients found in template data');
-            logger.error('Template data structure:', JSON.stringify(sourceTemplateData, null, 2));
-            
-            // Provide detailed error message with suggestions
-            const errorMessage = 'Recipients are required either in request body or template data. ' +
-              'No recipients found in template data. ' +
-              'Expected structure: {"recipients": [{"name": "John Doe", "email": "john@example.com", "signatureField": "signature1"}]} ' +
-              'or individual fields like: {"signerName": "John Doe", "signerEmail": "john@example.com"}. ' +
-              'Alternatively, provide "defaultRecipients" in the request body as a fallback.';
-            
-            return next(new ApiError(400, errorMessage));
-          }
-        }
-        logger.info(`Extracted ${recipients.length} recipients from template data`);
-        
-        // Auto-generate signature field mapping from extracted recipients
-        if (!signatureFieldMapping) {
-          signatureFieldMapping = {};
-          recipients.forEach(recipient => {
-            if (recipient.signatureField) {
-              signatureFieldMapping[recipient.email] = recipient.signatureField;
+              return {
+                name: field,
+                type: 'signature',
+                required: true
+              };
             }
           });
-          logger.info(`Auto-generated signature field mapping for ${Object.keys(signatureFieldMapping).length} recipients`);
+          
+          finalPdfPath = filePath;
+          processedFilePath = filePath;
+          
+        } catch (error) {
+          logger.error(`Error analyzing PDF: ${error.message}`);
+          return next(new ApiError(500, `Failed to analyze PDF: ${error.message}`));
+        }
+      }
+    } else if (['.docx', '.doc'].includes(fileExtension)) {
+      if (hasTemplateData) {
+        try {
+          const processedDocPath = await documentProcessor.processDocumentTemplate(filePath, templateData);
+          processedFilePath = processedDocPath;
+          
+          // Convert processed DOCX to PDF for signing
+          const conversionResult = await documentProcessor.convertDocxToPdf(processedDocPath);
+          finalPdfPath = conversionResult;
+          pageCount = 1; // Will be updated after conversion          
+          logger.info(`DOCX template processing completed. Variables replaced: ${processResult.replacedVariables || 0}`);
+        } catch (error) {
+          logger.error(`Error processing DOCX template: ${error.message}`);
+          return next(new ApiError(500, `Failed to process DOCX template: ${error.message}`));
         }
       } else {
-        // Try to use default recipients if provided
-        if (defaultRecipients && Array.isArray(defaultRecipients) && defaultRecipients.length > 0) {
-          logger.info('No template data available, using provided default recipients');
-          recipients = defaultRecipients;
-        } else {
-          return next(new ApiError(400, 'Recipients are required either in request body, template data, or as defaultRecipients'));
+        try {
+          const conversionResult = await documentProcessor.convertDocxToPdf(filePath, filename);
+          finalPdfPath = conversionResult.pdfPath;
+          pageCount = conversionResult.pageCount;
+          processedFilePath = filePath;
+          
+          logger.info(`DOCX converted to PDF for signing: ${finalPdfPath}`);
+        } catch (error) {
+          logger.error(`Error converting DOCX to PDF: ${error.message}`);
+          return next(new ApiError(500, `Failed to convert DOCX to PDF: ${error.message}`));
         }
       }
-    } else if (!Array.isArray(recipients)) {
-      return next(new ApiError(400, 'Recipients must be an array'));
-    }
-    
-    // Validate signing flow option
-    const validSigningFlows = ['SEQUENTIAL', 'PARALLEL'];
-    const selectedSigningFlow = signingFlow && validSigningFlows.includes(signingFlow.toUpperCase()) 
-      ? signingFlow.toUpperCase() 
-      : 'PARALLEL'; // Default to parallel so reminders go to all unsigned recipients
-    
-    // Validate and format recipients
-    const formattedRecipients = recipients.map((recipient, index) => {
-      if (!recipient.name || !recipient.email) {
-        throw new ApiError(400, 'Each recipient must have a name and email');
-      }
-      
-      return {
-        name: recipient.name,
-        email: recipient.email,
-        title: recipient.title || recipient.position || null, // Include title from templateData
-        order: selectedSigningFlow === 'SEQUENTIAL' ? index + 1 : 1, // Sequential: 1,2,3... Parallel: all 1
-        status: 'pending',
-        signatureField: recipient.signatureField || signatureFieldMapping?.[recipient.email] || `signature_${index + 1}`
-      };
-    });
-    
-    // Update document with recipients and signature field mapping
-    document.recipients = formattedRecipients;
-    document.status = 'ready_for_signature';
-    document.signatureFieldMapping = signatureFieldMapping || {};
-    document.signingFlow = selectedSigningFlow;
-    await document.save();
-    
-    logger.info(`Document prepared for signature: ${document.originalName}`);
-    
-    // Step 3: Send for signature (reuse sendForSignature logic)
-    // First check if we're currently rate limited by Adobe Sign
-    if (rateLimitProtection.isRateLimited()) {
-      const timeRemaining = rateLimitProtection.getTimeRemaining();
-      const status = rateLimitProtection.getRateLimitStatus();
-      
-      logger.warn(`Rate limit check failed: ${status}`);
-      return next(new ApiError(429, `Adobe Sign rate limit in effect. Please try again after ${Math.ceil(timeRemaining / 60)} minutes.`));
-    }
-    
-    // Validate Adobe Sign configuration
-    const { validateAdobeSignConfig } = require('../config/adobeSign');
-    const configValidation = validateAdobeSignConfig();
-    
-    if (!configValidation.isValid) {
-      logger.error('Adobe Sign configuration validation failed:', configValidation.errors);
-      return next(new ApiError(500, `Adobe Sign configuration error: ${configValidation.errors.join(', ')}`));
-    }
-    
-    // Validate recipient emails
-    const invalidRecipients = document.recipients.filter(recipient => {
-      const email = recipient.email;
-      return !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-    });
-    
-    if (invalidRecipients.length > 0) {
-      return next(new ApiError(400, `Invalid recipient email addresses: ${invalidRecipients.map(r => r.email || 'missing email').join(', ')}`));
     }
 
+    // Create document record
+    const document = new Document({
+      ...documentData,
+      pageCount,
+      processedFilePath: processedFilePath || filePath,
+      finalPdfPath,
+      recipients: extractedRecipients.length > 0 ? extractedRecipients : [],
+      signingFlow: req.body.signingFlow || 'SEQUENTIAL',
+      apiKeyId: req.apiKey._id,
+      organizationId: req.apiKey.organizationId
+    });
+
+    await document.save();
+    logger.info(`Document saved with ID: ${document._id}`);
+
+    // Step 2: Upload to Adobe Sign and create agreement WITHOUT sending emails
     try {
-      // Determine which file to use for Adobe Sign
-      let fileToUpload = document.filePath;
-      
-      // Priority 1: Use processed DOCX file if template variables were processed (KEEP IT EDITABLE)
-      if (document.processedFilePath && fs.existsSync(document.processedFilePath)) {
-        fileToUpload = document.processedFilePath;
-        logger.info(`Using processed DOCX file with template variables: ${document.processedFilePath}`);
-        logger.info(`This keeps the document editable in Adobe Sign for form fields and signatures`);
-      }
-      // Priority 2: Use converted PDF file only if no processed DOCX exists
-      else if (document.pdfFilePath && fs.existsSync(document.pdfFilePath)) {
-        fileToUpload = document.pdfFilePath;
-        logger.info(`Using converted PDF file: ${document.pdfFilePath}`);
-      }
-      // Priority 3: Use original file
-      else {
-        logger.info(`Using original file: ${fileToUpload}`);
-      }
-      
-      // Check if file exists
-      if (!fs.existsSync(fileToUpload)) {
-        logger.error(`File not found at path: ${fileToUpload}`);
-        return next(new ApiError(404, 'Document file not found on server'));
-      }
+      const fileToUpload = finalPdfPath || processedFilePath || filePath;
       
       // Get file stats to ensure it's not empty
       const fileStats = fs.statSync(fileToUpload);
@@ -2100,36 +1847,8 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
       const transientDocumentId = await uploadTransientDocument(fileToUpload);
       logger.info(`Document uploaded as transient document: ${transientDocumentId}`);
       
-      // Ensure we have a webhook setup for status updates
-      try {
-        const accessToken = await getAccessToken();
-        const webhookUrl = process.env.ADOBE_WEBHOOK_URL || `${req.protocol}://${req.get('host')}/api/webhooks/adobe-sign`;
-        const isHttps = webhookUrl.startsWith('https://');
-        
-        if (!isHttps && process.env.NODE_ENV === 'production') {
-          logger.warn(`Skipping webhook setup as Adobe Sign requires HTTPS URLs in production: ${webhookUrl}`);
-        } else if (webhookUrl) {
-          try {
-            const createWebhookLocal = require('../config/createWebhook');
-            const webhookResult = await createWebhookLocal(accessToken, webhookUrl);
-            
-            if (webhookResult._mockImplementation) {
-              logger.info(`Mock webhook setup for Adobe Sign: ${webhookUrl} (reason: ${webhookResult._mockReason || 'mock'})`);
-            } else {
-              logger.info(`Real webhook setup for Adobe Sign: ${webhookUrl}`);
-            }
-          } catch (innerWebhookError) {
-            logger.error(`Inner webhook error: ${innerWebhookError.message}`);
-          }
-        } else {
-          logger.warn('No webhook URL configured for Adobe Sign updates');
-        }
-      } catch (webhookError) {
-        logger.error(`Error setting up webhook: ${webhookError.message}`);
-      }
-      
-      // Use the comprehensive approach from adobeSignFormFields utility
-      logger.info(`Using comprehensive approach to create agreement: ${document.originalName}`);
+      // Create agreement with email notifications DISABLED
+      logger.info(`Creating agreement without email notifications: ${document.originalName}`);
       const result = await createAgreementWithBestApproach(
         transientDocumentId,
         document.recipients,
@@ -2137,17 +1856,26 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
         {
           templateId: document.templateId,
           autoDetectedSignatureFields: document.autoDetectedSignatureFields || [],
-          signingFlow: document.signingFlow || 'SEQUENTIAL'
+          signingFlow: document.signingFlow || 'SEQUENTIAL',
+          // Disable email notifications
+          emailOptions: {
+            sendOptions: {
+              initEmails: 'NONE',
+              inFlightEmails: 'NONE', 
+              completionEmails: 'NONE'
+            }
+          }
         }
       );
       
       // Update document with Adobe Sign agreement ID
       document.adobeAgreementId = result.agreementId;
-      document.status = 'sent_for_signature';
+      document.status = 'ready_for_signature';
       document.adobeMetadata = {
         agreementId: result.agreementId,
         method: result.method,
-        createdAt: new Date()
+        createdAt: new Date(),
+        emailNotificationsDisabled: true
       };
       
       // Special handling for rate limiting
@@ -2163,15 +1891,10 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
         
         return next(new ApiError(429, `Adobe Sign rate limit reached. Please try again after ${Math.ceil(result.retryAfter / 60)} minutes.`));
       }
-      
-      // Update recipients status
-      document.recipients.forEach(recipient => {
-        recipient.status = 'sent';
-      });
-      
+
       await document.save();
       
-      // Step 4: Get and store signing URLs for all recipients (with retry logic)
+      // Step 3: Get signing URLs for all recipients
       try {
         const accessToken = await getAccessToken();
         
@@ -2184,7 +1907,7 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
         // Log the complete agreement structure for debugging
         logger.info('Complete agreement info structure:', JSON.stringify(agreementInfo, null, 2));
         
-        // Check for participant sets in different possible locations with more detailed analysis
+        // Check for participant sets in different possible locations
         const participantSets = agreementInfo.participantSets || 
                                agreementInfo.participantSetsInfo || 
                                agreementInfo.participants ||
@@ -2192,32 +1915,23 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
         
         if (participantSets && participantSets.length > 0) {
           logger.info(`Found ${participantSets.length} participant sets for signing URL retrieval`);
-          logger.info('Participant sets structure:', JSON.stringify(participantSets, null, 2));
           
           // Map recipients to participant sets and get their signing URLs
           for (const recipient of document.recipients) {
             let participantFound = false;
             
             for (const participantSet of participantSets) {
-              logger.info(`Processing participant set:`, JSON.stringify(participantSet, null, 2));
-              
-              // Check for member info in different possible structures
               const memberInfos = participantSet.memberInfos || 
                                 participantSet.members || 
                                 participantSet.participantSetMemberInfos ||
                                 (participantSet.participantSetInfo ? participantSet.participantSetInfo.memberInfos : null) ||
                                 [];
               
-              logger.info(`Found ${memberInfos.length} member infos in participant set`);
-              
               for (const participant of memberInfos) {
-                logger.info(`Checking participant:`, JSON.stringify(participant, null, 2));
-                
                 if (participant.email && participant.email.toLowerCase() === recipient.email.toLowerCase()) {
                   try {
                     logger.info(`Getting signing URL for ${recipient.email} using email address`);
                     
-                    // Use email address directly instead of participant ID
                     const signingUrlResponse = await getSigningUrl(
                       accessToken, 
                       document.adobeAgreementId,
@@ -2232,6 +1946,7 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
                         signingUrlResponse.signingUrlSetInfos[0].signingUrls[0]) {
                       
                       recipient.signingUrl = signingUrlResponse.signingUrlSetInfos[0].signingUrls[0].esignUrl;
+                      recipient.status = 'url_generated';
                       logger.info(`✅ Stored signing URL for ${recipient.email}: ${recipient.signingUrl}`);
                       participantFound = true;
                     } else {
@@ -2239,10 +1954,8 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
                     }
                   } catch (signingUrlError) {
                     logger.error(`Error getting signing URL for ${recipient.email}: ${signingUrlError.message}`);
-                    if (signingUrlError.response) {
-                      logger.error(`Adobe Sign URL error response:`, signingUrlError.response.data);
-                    }
-                    // Continue with other recipients even if one fails
+                    recipient.status = 'url_error';
+                    recipient.errorMessage = signingUrlError.message;
                   }
                   break;
                 }
@@ -2252,58 +1965,27 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
             
             if (!participantFound) {
               logger.warn(`No participant found for recipient ${recipient.email} in Adobe Sign agreement`);
+              recipient.status = 'participant_not_found';
             }
           }
           
           // Save the document with updated signing URLs
           await document.save();
           const urlCount = document.recipients.filter(r => r.signingUrl).length;
-          logger.info(`Updated document with signing URLs for ${urlCount}/${document.recipients.length} recipients`);
-          
-          // If no URLs were generated, try an alternative approach
-          if (urlCount === 0) {
-            logger.warn('No signing URLs generated, trying alternative approach...');
-            
-            // Try getting URLs immediately after a shorter delay
-            setTimeout(async () => {
-              try {
-                await retrySigningUrlGeneration(document.adobeAgreementId, document._id);
-              } catch (retryError) {
-                logger.error(`Retry URL generation failed: ${retryError.message}`);
-              }
-            }, 5000); // Try again after 5 seconds
-          }
+          logger.info(`Generated signing URLs for ${urlCount}/${document.recipients.length} recipients`);
           
         } else {
           logger.warn(`No participant sets found in agreement response. Available keys: ${Object.keys(agreementInfo).join(', ')}`);
-          
-          // Log specific fields that might contain participant info
-          if (agreementInfo.participantSetsInfo) {
-            logger.info('participantSetsInfo content:', JSON.stringify(agreementInfo.participantSetsInfo, null, 2));
-          }
-          if (agreementInfo.participantSets) {
-            logger.info('participantSets content:', JSON.stringify(agreementInfo.participantSets, null, 2));
-          }
-          
-          // Schedule a retry for later
-          setTimeout(async () => {
-            try {
-              logger.info('Retrying signing URL generation after delay...');
-              await retrySigningUrlGeneration(document.adobeAgreementId, document._id);
-            } catch (retryError) {
-              logger.error(`Delayed retry failed: ${retryError.message}`);
-            }
-          }, 10000); // Try again after 10 seconds
         }
       } catch (signingUrlError) {
         logger.error(`Error retrieving signing URLs: ${signingUrlError.message}`);
-        // Continue anyway - signing URLs can be retrieved later if needed
+        // Continue anyway - return what we have
       }
       
-      // Log document sent for signature
+      // Log document prepared for signature
       await Log.create({
         level: 'info',
-        message: `Document uploaded, prepared, and sent for signature using ${result.method} approach: ${document.originalName}`,
+        message: `Document uploaded and prepared for signature URLs (no emails sent): ${document.originalName}`,
         documentId: document._id,
         ipAddress: req.ip,
         requestPath: req.originalUrl,
@@ -2312,30 +1994,45 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
           adobeAgreementId: result.agreementId,
           method: result.method,
           recipientCount: document.recipients.length,
-          combined_operation: true,
+          emailNotificationsDisabled: true,
           upload_method: req.body.documentUrl ? 'url_download' : 'file_upload',
           template_variables_count: Object.keys(templateData).length
         }
       });
       
-      logger.info(`Document uploaded, prepared, and sent for signature using ${result.method} approach: ${document.originalName}`);
+      logger.info(`Document prepared for signature URLs (no emails sent): ${document.originalName}`);
+      
+      // Prepare signing URLs response
+      const signingUrlsData = document.recipients.map(r => ({
+        email: r.email,
+        name: r.name,
+        title: r.title,
+        signingUrl: r.signingUrl || null,
+        status: r.status,
+        errorMessage: r.errorMessage || null
+      }));
       
       res.status(201).json(formatResponse(
         201,
-        `Document uploaded, prepared, and sent for signature successfully using ${result.method} approach`,
+        `Document uploaded and signing URLs generated successfully (no emails sent)`,
         { 
-          document,
+          document: {
+            id: document._id,
+            originalName: document.originalName,
+            status: document.status,
+            adobeAgreementId: document.adobeAgreementId,
+            recipients: document.recipients.length,
+            templateVariablesProcessed: Object.keys(templateData).length,
+            createdAt: document.createdAt
+          },
           adobeAgreementId: result.agreementId,
           method: result.method,
+          emailNotificationsDisabled: true,
           uploadMethod: req.body.documentUrl ? 'url_download' : 'file_upload',
           templateVariablesProcessed: Object.keys(templateData).length,
-          signingUrls: document.recipients.map(r => ({
-            email: r.email,
-            name: r.name,
-            title: r.title,
-            signingUrl: r.signingUrl || null,
-            status: r.status
-          }))
+          signingUrls: signingUrlsData,
+          successfulUrls: signingUrlsData.filter(url => url.signingUrl).length,
+          totalRecipients: signingUrlsData.length
         }
       ));
     } catch (adobeError) {
@@ -2349,10 +2046,535 @@ exports.uploadPrepareAndSend = async (req, res, next) => {
       document.errorMessage = adobeError.message;
       await document.save();
       
-      return next(new ApiError(500, `Failed to send document for signature: ${adobeError.message}`));
+      return next(new ApiError(500, `Adobe Sign API Error: ${adobeError.message}`));
     }
+
   } catch (error) {
-    next(error);
+    logger.error(`Error in uploadForSigningUrls: ${error.message}`, { error: error.stack });
+    
+    // Clean up uploaded file if document creation failed
+    if (req.files) {
+      Object.values(req.files).flat().forEach(file => {
+        if (file.path && fs.existsSync(file.path)) {
+          try {
+            fs.unlinkSync(file.path);
+          } catch (cleanupError) {
+            logger.error(`Error cleaning up file: ${cleanupError.message}`);
+          }
+        }
+      });
+    }
+    
+    return next(new ApiError(500, `Failed to upload document and generate signing URLs: ${error.message}`));
+  }
+};
+
+/**
+ * Upload document and get signing URLs without sending emails
+ * This allows clients to handle email sending themselves
+ * @route POST /api/documents/upload-for-urls
+ */
+exports.uploadForSigningUrls = async (req, res, next) => {
+  try {
+    // Step 0: Parse JSON data first to determine if we have template data
+    let templateData = {};
+    
+    // Method 1: JSON data from uploaded file
+    const dataFile = req.files && req.files.data ? req.files.data[0] : null;
+    
+    // Add debug logging to see which method is being used
+    logger.info('=== JSON DATA METHOD DETECTION (Upload for URLs) ===');
+    logger.info('Has dataFile (Method 1):', !!dataFile);
+    logger.info('Has req.body.templateData:', !!req.body.templateData);
+    logger.info('Has req.body.jsonData:', !!req.body.jsonData);
+    logger.info('====================================================');
+    
+    if (dataFile) {
+      try {
+        const jsonContent = fs.readFileSync(dataFile.path, 'utf8');
+        templateData = JSON.parse(jsonContent);
+        
+        // Clean up the temporary JSON file
+        fs.unlinkSync(dataFile.path);
+        
+        logger.info(`JSON data file processed with ${Object.keys(templateData).length} variables`);
+      } catch (jsonError) {
+        logger.error(`Error parsing JSON data: ${jsonError.message}`);
+        return next(new ApiError(400, 'Invalid JSON data file'));
+      }
+    }
+    
+    // Method 2: Multiple JSON files (from uploadDocumentFromUrl with files)
+    if (!dataFile && req.files && req.files.jsonData) {
+      try {
+        const jsonFiles = Array.isArray(req.files.jsonData) ? req.files.jsonData : [req.files.jsonData];
+        let combinedData = {};
+        
+        for (const file of jsonFiles) {
+          const jsonContent = fs.readFileSync(file.path, 'utf8');
+          const parsedData = JSON.parse(jsonContent);
+          combinedData = { ...combinedData, ...parsedData };
+          
+          // Clean up the temporary JSON file
+          fs.unlinkSync(file.path);
+        }
+        
+        templateData = combinedData;
+        logger.info(`Combined JSON data from ${jsonFiles.length} files with ${Object.keys(templateData).length} total variables`);
+      } catch (jsonError) {
+        logger.error(`Error processing JSON files: ${jsonError.message}`);
+        return next(new ApiError(400, 'Invalid JSON data files'));
+      }
+    }
+    
+    // Method 3: JSON data from request body (templateData or jsonData field)
+    if (!dataFile && Object.keys(templateData).length === 0 && (req.body.templateData || req.body.jsonData)) {
+      try {
+        const jsonSource = req.body.templateData || req.body.jsonData;
+        templateData = typeof jsonSource === 'string' 
+          ? JSON.parse(jsonSource) 
+          : jsonSource;
+        logger.info(`Inline JSON data processed with ${Object.keys(templateData).length} variables`);
+        logger.info('Method 3: JSON data extracted from request body:', JSON.stringify(templateData, null, 2));
+      } catch (jsonError) {
+        logger.error(`Error parsing JSON data from body: ${jsonError.message}`);
+        return next(new ApiError(400, 'Invalid JSON data in request body'));
+      }
+    }
+
+    // Extract recipients from template data
+    const extractedRecipients = extractRecipientsFromTemplateData(templateData);
+    
+    // Determine if we have template data for format preference
+    const hasTemplateData = Object.keys(templateData).length > 0;
+    logger.info(`Template data detection: ${hasTemplateData ? 'YES' : 'NO'} (${Object.keys(templateData).length} variables)`);
+
+    // Step 1: Upload and process document - support all three upload methods
+    let filePath = null;
+    let filename = null;
+    let originalname = null;
+    let mimetype = null;
+    let size = null;
+    
+    // Method 1: File upload (original uploadDocumentWithData)
+    if (req.files && (req.files.document || req.files.documents)) {
+      // Support both 'document' and 'documents' field names
+      const documentFile = req.files.document ? req.files.document[0] : req.files.documents[0];
+      ({ filename, originalname, mimetype, size, path: filePath } = documentFile);
+      logger.info(`Method 1: File upload - ${originalname}`);
+    }
+    // Method 2 & 3: Document URL (from uploadDocumentFromUrl)
+    else if (req.body.documentUrl) {
+      const documentUrl = req.body.documentUrl;
+      
+      if (!documentUrl) {
+        return next(new ApiError(400, 'Document URL is required when not uploading a file'));
+      }
+      
+      // Download document from URL with template data awareness
+      try {
+        logger.info(`Downloading from URL with template data: ${hasTemplateData}`);
+        const downloadResult = await urlUtils.downloadDocumentFromUrl(documentUrl, null, 0, {}, hasTemplateData);
+        
+        filePath = downloadResult.path;
+        originalname = downloadResult.originalName;
+        filename = downloadResult.filename;
+        mimetype = downloadResult.mimetype;
+        size = downloadResult.size;
+        
+        logger.info(`Method 2/3: URL download - ${documentUrl} -> ${originalname}`);
+        logger.info(`Downloaded file type: ${mimetype}, extension: ${path.extname(originalname)}`);
+      } catch (downloadError) {
+        logger.error(`Error downloading document from URL: ${downloadError.message}`);
+        return next(new ApiError(400, `Failed to download document from URL: ${downloadError.message}`));
+      }
+    }
+    else {
+      return next(new ApiError(400, 'No document uploaded or document URL provided. Please provide either a file upload or documentUrl in request body.'));
+    }
+
+    // Initialize document data
+    let documentData = {
+      filename,
+      originalName: originalname,
+      fileSize: size,
+      filePath,
+      mimeType: mimetype,
+      status: 'uploaded',
+      templateData
+    };
+
+    // Process document based on file type (similar to existing logic)
+    const fileExtension = path.extname(originalname).toLowerCase();
+    let finalPdfPath = filePath;
+    let pageCount = 0;
+    let processedFilePath = null;
+    
+    // Validate that filePath is properly set
+    if (!filePath) {
+      logger.error('File path is undefined or null');
+      return next(new ApiError(500, 'File path not properly initialized'));
+    }
+    
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      logger.error(`File does not exist at path: ${filePath}`);
+      return next(new ApiError(500, 'File not found at expected location'));
+    }
+    
+    // Get file information and validate
+    let fileInfo;
+    try {
+      fileInfo = documentUtils.getFileInfo(filePath);
+      logger.info(`File info for ${originalname}:`, fileInfo);
+    } catch (error) {
+      logger.error(`Failed to get file info: ${error.message}`);
+      return next(new ApiError(500, `Failed to analyze file: ${error.message}`));
+    }
+    
+    // Process document based on type
+    if (fileExtension === '.pdf') {
+      if (fileInfo.isPdf) {
+        try {
+          const pdfInfo = await documentUtils.analyzePdf(filePath);
+          pageCount = pdfInfo.pageCount;
+          
+          const analysis = await documentProcessor.analyzeDocumentForSignatureFields(filePath);
+          documentData.templateVariables = analysis.templateVariables;
+          documentData.documentAnalysis = analysis;
+          documentData.autoDetectedSignatureFields = (analysis.signatureFields || []).map(field => {
+            if (typeof field === 'object' && field.name) {
+              return {
+                name: field.name,
+                type: field.type.toLowerCase(),
+                required: true,
+                x: field.x,
+                y: field.y,
+                width: field.width,
+                height: field.height,
+                page: field.page,
+                detected: true
+              };
+            } else {
+              return {
+                name: field,
+                type: 'signature',
+                required: true
+              };
+            }
+          });
+          
+          finalPdfPath = filePath;
+          processedFilePath = filePath;
+          
+        } catch (error) {
+          logger.error(`Error analyzing PDF: ${error.message}`);
+          return next(new ApiError(500, `Failed to analyze PDF: ${error.message}`));
+        }
+      }
+    } else if (['.docx', '.doc'].includes(fileExtension)) {
+      if (hasTemplateData) {
+        try {
+          // First check if document actually has template variables
+          logger.info(`Attempting to process template with data: ${JSON.stringify(templateData)}`);
+          
+          const processedDocPath = await documentProcessor.processDocumentTemplate(filePath, templateData);
+          processedFilePath = processedDocPath;
+          
+          // Convert processed DOCX to PDF for signing
+          const conversionResult = await documentProcessor.convertDocxToPdf(processedDocPath);
+          finalPdfPath = conversionResult;
+          pageCount = 1; // Will be updated after conversion          
+          documentData.processedFilePath = processedFilePath;
+          documentData.templateVariablesReplaced = Object.keys(templateData).length || 0;
+          
+          logger.info(`DOCX template processing completed. Variables replaced: ${Object.keys(templateData).length || 0}`);
+        } catch (error) {
+          logger.error(`Error processing DOCX template in uploadForSigningUrls: ${error.message}`);
+          logger.error(`Error stack: ${error.stack}`);
+          if (error.properties) {
+            logger.error(`Error properties: ${JSON.stringify(error.properties, null, 2)}`);
+          }
+          
+          // Fallback: If template processing fails, try direct conversion
+          logger.warn('Template processing failed, falling back to direct conversion');
+          try {
+            const conversionResult = await documentProcessor.convertDocxToPdf(filePath);
+            finalPdfPath = conversionResult;
+            pageCount = 1;
+            processedFilePath = filePath;
+            
+            logger.info('Successfully converted DOCX to PDF without template processing');
+          } catch (fallbackError) {
+            logger.error(`Fallback conversion also failed: ${fallbackError.message}`);
+            return next(new ApiError(500, `Failed to process DOCX document: ${error.message}`));
+          }
+        }
+      } else {
+        try {
+          const conversionResult = await documentProcessor.convertDocxToPdf(filePath, filename);
+          finalPdfPath = conversionResult.pdfPath;
+          pageCount = conversionResult.pageCount;
+          processedFilePath = filePath;
+          
+          logger.info(`DOCX converted to PDF for signing: ${finalPdfPath}`);
+        } catch (error) {
+          logger.error(`Error converting DOCX to PDF: ${error.message}`);
+          return next(new ApiError(500, `Failed to convert DOCX to PDF: ${error.message}`));
+        }
+      }
+    }
+
+    // Create document record
+    const document = new Document({
+      ...documentData,
+      pageCount,
+      processedFilePath: processedFilePath || filePath,
+      finalPdfPath,
+      recipients: extractedRecipients.length > 0 ? extractedRecipients : [],
+      signingFlow: req.body.signingFlow || 'SEQUENTIAL',
+      apiKeyId: req.apiKey._id,
+      organizationId: req.apiKey.organizationId
+    });
+
+    await document.save();
+    logger.info(`Document saved with ID: ${document._id}`);
+
+    // Step 2: Upload to Adobe Sign and create agreement WITHOUT sending emails
+    try {
+      const fileToUpload = finalPdfPath || processedFilePath || filePath;
+      
+      // Get file stats to ensure it's not empty
+      const fileStats = fs.statSync(fileToUpload);
+      if (fileStats.size === 0) {
+        logger.error(`File is empty: ${fileToUpload}`);
+        return next(new ApiError(400, 'Document file is empty'));
+      }
+      
+      // Upload as transient document
+      logger.info(`Uploading document as transient document: ${document.originalName}`);
+      const transientDocumentId = await uploadTransientDocument(fileToUpload);
+      logger.info(`Document uploaded as transient document: ${transientDocumentId}`);
+      
+      // Create agreement with email notifications DISABLED
+      logger.info(`Creating agreement without email notifications: ${document.originalName}`);
+      const result = await createAgreementWithBestApproach(
+        transientDocumentId,
+        document.recipients,
+        document.originalName,
+        {
+          templateId: document.templateId,
+          autoDetectedSignatureFields: document.autoDetectedSignatureFields || [],
+          signingFlow: document.signingFlow || 'SEQUENTIAL',
+          // Disable email notifications
+          emailOptions: {
+            sendOptions: {
+              initEmails: 'NONE',
+              inFlightEmails: 'NONE', 
+              completionEmails: 'NONE'
+            }
+          }
+        }
+      );
+      
+      // Update document with Adobe Sign agreement ID
+      document.adobeAgreementId = result.agreementId;
+      document.status = 'ready_for_signature';
+      document.adobeMetadata = {
+        agreementId: result.agreementId,
+        method: result.method,
+        createdAt: new Date(),
+        emailNotificationsDisabled: true
+      };
+      
+      // Special handling for rate limiting
+      if (result.rateLimited) {
+        logger.warn(`Adobe Sign rate limit reached. Retry after ${result.retryAfter} seconds.`);
+        document.status = 'signature_error';
+        document.errorMessage = `Rate limit reached. Please try again later (after ${Math.ceil(result.retryAfter / 60)} minutes).`;
+        document.adobeMetadata.rateLimited = true;
+        document.adobeMetadata.retryAfter = result.retryAfter;
+        document.adobeMetadata.retryAfterDate = new Date(Date.now() + (result.retryAfter * 1000));
+        
+        await document.save();
+        
+        return next(new ApiError(429, `Adobe Sign rate limit reached. Please try again after ${Math.ceil(result.retryAfter / 60)} minutes.`));
+      }
+
+      await document.save();
+      
+      // Step 3: Get signing URLs for all recipients
+      try {
+        const accessToken = await getAccessToken();
+        
+        // Wait a moment for the agreement to be fully processed
+        logger.info('Waiting 3 seconds for agreement to be processed before retrieving signing URLs...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        const agreementInfo = await getAgreementInfo(accessToken, document.adobeAgreementId);
+        
+        // Log the complete agreement structure for debugging
+        logger.info('Complete agreement info structure:', JSON.stringify(agreementInfo, null, 2));
+        
+        // Check for participant sets in different possible locations
+        const participantSets = agreementInfo.participantSets || 
+                               agreementInfo.participantSetsInfo || 
+                               agreementInfo.participants ||
+                               [];
+        
+        if (participantSets && participantSets.length > 0) {
+          logger.info(`Found ${participantSets.length} participant sets for signing URL retrieval`);
+          
+          // Map recipients to participant sets and get their signing URLs
+          for (const recipient of document.recipients) {
+            let participantFound = false;
+            
+            for (const participantSet of participantSets) {
+              const memberInfos = participantSet.memberInfos || 
+                                participantSet.members || 
+                                participantSet.participantSetMemberInfos ||
+                                (participantSet.participantSetInfo ? participantSet.participantSetInfo.memberInfos : null) ||
+                                [];
+              
+              for (const participant of memberInfos) {
+                if (participant.email && participant.email.toLowerCase() === recipient.email.toLowerCase()) {
+                  try {
+                    logger.info(`Getting signing URL for ${recipient.email} using email address`);
+                    
+                    const signingUrlResponse = await getSigningUrl(
+                      accessToken, 
+                      document.adobeAgreementId,
+                      recipient.email
+                    );
+                    
+                    logger.info(`Signing URL response for ${recipient.email}:`, JSON.stringify(signingUrlResponse, null, 2));
+                    
+                    if (signingUrlResponse.signingUrlSetInfos && 
+                        signingUrlResponse.signingUrlSetInfos[0] && 
+                        signingUrlResponse.signingUrlSetInfos[0].signingUrls && 
+                        signingUrlResponse.signingUrlSetInfos[0].signingUrls[0]) {
+                      
+                      recipient.signingUrl = signingUrlResponse.signingUrlSetInfos[0].signingUrls[0].esignUrl;
+                      recipient.status = 'url_generated';
+                      logger.info(`✅ Stored signing URL for ${recipient.email}: ${recipient.signingUrl}`);
+                      participantFound = true;
+                    } else {
+                      logger.warn(`Invalid signing URL response structure for ${recipient.email}:`, signingUrlResponse);
+                    }
+                  } catch (signingUrlError) {
+                    logger.error(`Error getting signing URL for ${recipient.email}: ${signingUrlError.message}`);
+                    recipient.status = 'url_error';
+                    recipient.errorMessage = signingUrlError.message;
+                  }
+                  break;
+                }
+              }
+              if (participantFound) break;
+            }
+            
+            if (!participantFound) {
+              logger.warn(`No participant found for recipient ${recipient.email} in Adobe Sign agreement`);
+              recipient.status = 'participant_not_found';
+            }
+          }
+          
+          // Save the document with updated signing URLs
+          await document.save();
+          const urlCount = document.recipients.filter(r => r.signingUrl).length;
+          logger.info(`Generated signing URLs for ${urlCount}/${document.recipients.length} recipients`);
+          
+        } else {
+          logger.warn(`No participant sets found in agreement response. Available keys: ${Object.keys(agreementInfo).join(', ')}`);
+        }
+      } catch (signingUrlError) {
+        logger.error(`Error retrieving signing URLs: ${signingUrlError.message}`);
+        // Continue anyway - return what we have
+      }
+      
+      // Log document prepared for signature
+      await Log.create({
+        level: 'info',
+        message: `Document uploaded and prepared for signature URLs (no emails sent): ${document.originalName}`,
+        documentId: document._id,
+        ipAddress: req.ip,
+        requestPath: req.originalUrl,
+        requestMethod: req.method,
+        metadata: {
+          adobeAgreementId: result.agreementId,
+          method: result.method,
+          recipientCount: document.recipients.length,
+          emailNotificationsDisabled: true,
+          upload_method: req.body.documentUrl ? 'url_download' : 'file_upload',
+          template_variables_count: Object.keys(templateData).length
+        }
+      });
+      
+      logger.info(`Document prepared for signature URLs (no emails sent): ${document.originalName}`);
+      
+      // Prepare signing URLs response
+      const signingUrlsData = document.recipients.map(r => ({
+        email: r.email,
+        name: r.name,
+        title: r.title,
+        signingUrl: r.signingUrl || null,
+        status: r.status,
+        errorMessage: r.errorMessage || null
+      }));
+      
+      res.status(201).json(formatResponse(
+        201,
+        `Document uploaded and signing URLs generated successfully (no emails sent)`,
+        { 
+          document: {
+            id: document._id,
+            originalName: document.originalName,
+            status: document.status,
+            adobeAgreementId: document.adobeAgreementId,
+            recipients: document.recipients.length,
+            templateVariablesProcessed: Object.keys(templateData).length,
+            createdAt: document.createdAt
+          },
+          adobeAgreementId: result.agreementId,
+          method: result.method,
+          emailNotificationsDisabled: true,
+          uploadMethod: req.body.documentUrl ? 'url_download' : 'file_upload',
+          templateVariablesProcessed: Object.keys(templateData).length,
+          signingUrls: signingUrlsData,
+          successfulUrls: signingUrlsData.filter(url => url.signingUrl).length,
+          totalRecipients: signingUrlsData.length
+        }
+      ));
+    } catch (adobeError) {
+      logger.error(`Adobe Sign API Error: ${adobeError.message}`);
+      if (adobeError.response) {
+        logger.error(`Status: ${adobeError.response.status}, Data: ${JSON.stringify(adobeError.response.data)}`);
+      }
+      
+      // Update document status to indicate error
+      document.status = 'signature_error';
+      document.errorMessage = adobeError.message;
+      await document.save();
+      
+      return next(new ApiError(500, `Adobe Sign API Error: ${adobeError.message}`));
+    }
+
+  } catch (error) {
+    logger.error(`Error in uploadForSigningUrls: ${error.message}`, { error: error.stack });
+    
+    // Clean up uploaded file if document creation failed
+    if (req.files) {
+      Object.values(req.files).flat().forEach(file => {
+        if (file.path && fs.existsSync(file.path)) {
+          try {
+            fs.unlinkSync(file.path);
+          } catch (cleanupError) {
+            logger.error(`Error cleaning up file: ${cleanupError.message}`);
+          }
+        }
+      });
+    }
+    
+    return next(new ApiError(500, `Failed to upload document and generate signing URLs: ${error.message}`));
   }
 };
 

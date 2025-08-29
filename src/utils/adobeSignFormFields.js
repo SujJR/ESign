@@ -198,7 +198,7 @@ const createAgreementFromTemplate = async (templateId, recipients) => {
  * @param {string} documentName - Name of the document
  * @returns {Promise<string>} - Agreement ID
  */
-const createAgreementWithTextTags = async (transientDocumentId, recipients, documentName, signingFlow = 'SEQUENTIAL') => {
+const createAgreementWithTextTags = async (transientDocumentId, recipients, documentName, signingFlow = 'SEQUENTIAL', emailOptions = null) => {
   try {
     logger.info('Creating agreement using Adobe Sign text tags embedded in the document');
     
@@ -258,6 +258,12 @@ const createAgreementWithTextTags = async (transientDocumentId, recipients, docu
         ? 'Please sign this document in the designated order. You will receive an email when it is your turn to sign.'
         : 'Please sign at the signature fields indicated in the document.'
     };
+    
+    // Add email options if provided (to disable notifications)
+    if (emailOptions) {
+      payload.emailOption = emailOptions;
+      logger.info('Email options configured:', JSON.stringify(emailOptions, null, 2));
+    }
     
     logger.info(`Creating agreement with text tags for ${recipients.length} recipients`);
     logger.info('Text tags enabled - signature fields will appear exactly where tags are placed');
@@ -356,7 +362,7 @@ const generateOptimizedFormFields = (recipients, signingFlow = 'SEQUENTIAL') => 
  * @param {string} documentName - Name of the document
  * @returns {Promise<string>} - Agreement ID
  */
-const createBasicAgreement = async (transientDocumentId, recipients, documentName, signingFlow = 'SEQUENTIAL') => {
+const createBasicAgreement = async (transientDocumentId, recipients, documentName, signingFlow = 'SEQUENTIAL', emailOptions = null) => {
   try {
     logger.info('Creating basic agreement without explicit form fields');
     
@@ -402,6 +408,12 @@ const createBasicAgreement = async (transientDocumentId, recipients, documentNam
       signatureType: 'ESIGN',
       state: 'IN_PROCESS'
     };
+    
+    // Add email options if provided (to disable notifications)
+    if (emailOptions) {
+      payload.emailOption = emailOptions;
+      logger.info('Email options configured:', JSON.stringify(emailOptions, null, 2));
+    }
     
     const response = await client.post('api/rest/v6/agreements', payload);
     
@@ -850,7 +862,7 @@ const createAgreementWithBestApproach = async (transientDocumentId, recipients, 
   try {
     logger.info(`Creating agreement for document: ${documentName}`);
     
-    const { autoDetectedSignatureFields = [], signingFlow = 'SEQUENTIAL' } = options;
+    const { autoDetectedSignatureFields = [], signingFlow = 'SEQUENTIAL', emailOptions = null } = options;
     
     // Step 1: Check if document has Adobe Sign text tags (double braces format)
     let hasTextTags = false;
@@ -874,7 +886,7 @@ const createAgreementWithBestApproach = async (transientDocumentId, recipients, 
     if (hasTextTags) {
       logger.info('Adobe Sign text tags detected - using text tag approach ONLY');
       try {
-        const agreementId = await createAgreementWithTextTags(transientDocumentId, recipients, documentName, signingFlow);
+        const agreementId = await createAgreementWithTextTags(transientDocumentId, recipients, documentName, signingFlow, emailOptions);
         return {
           agreementId,
           method: 'text-tags',
@@ -918,7 +930,7 @@ const createAgreementWithBestApproach = async (transientDocumentId, recipients, 
     // Step 2: No text tags detected - use basic agreement approach
     logger.info('No Adobe Sign text tags detected - using basic agreement approach');
     try {
-      const agreementId = await createBasicAgreement(transientDocumentId, recipients, documentName, signingFlow);
+      const agreementId = await createBasicAgreement(transientDocumentId, recipients, documentName, signingFlow, emailOptions);
       return {
         agreementId,
         method: 'basic-agreement',

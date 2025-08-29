@@ -61,7 +61,7 @@ const documentSchema = new mongoose.Schema(
         order: { type: Number, default: 1 },
         status: { 
           type: String, 
-          enum: ['pending', 'sent', 'viewed', 'signed', 'declined', 'expired', 'waiting'],
+          enum: ['pending', 'sent', 'viewed', 'signed', 'declined', 'expired', 'waiting', 'url_generated', 'url_error', 'participant_not_found'],
           default: 'pending'
         },
         signedAt: { type: Date, default: null },

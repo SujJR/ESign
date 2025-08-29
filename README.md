@@ -174,6 +174,7 @@ npm run generate-keys
 
 ### Documents
 - `POST /api/documents/upload-and-send` - Upload and send document for signature (unified endpoint)
+- `POST /api/documents/upload-for-urls` - Upload and get signing URLs without sending emails (for custom notification workflows)
 - `GET /api/documents` - List user documents
 - `GET /api/documents/:id` - Get document details
 - `GET /api/documents/:id/status` - Check signature status

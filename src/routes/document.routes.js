@@ -456,4 +456,122 @@ router.post('/:id/send-reminder',
   documentController.sendReminder
 );
 
+/**
+ * @swagger
+ * /api/documents/upload-for-urls:
+ *   post:
+ *     summary: Upload document and get signing URLs without sending emails
+ *     tags: [Documents]
+ *     description: |
+ *       🔗 **SIGNING URLS ONLY ENDPOINT** - Upload and prepare document for signature, returning signing URLs without sending any emails.
+ *       
+ *       **Perfect for applications that want to handle email delivery themselves:**
+ *       - Upload document and prepare for signature
+ *       - Generate signing URLs for all recipients
+ *       - NO emails are sent to recipients
+ *       - Client handles email distribution
+ *       
+ *       **Supports same upload methods as upload-and-send:**
+ *       - **Method 1:** File Upload + JSON File (multipart/form-data)
+ *       - **Method 2:** Document URL + Inline JSON (application/json)
+ *       
+ *       **Key Features:**
+ *       - Document upload and processing
+ *       - Template variable replacement (DOCX files)
+ *       - Adobe Sign integration
+ *       - Signing URL generation
+ *       - Email notifications DISABLED
+ *       - Full control over recipient communication
+ *       
+ *       **Use this when:**
+ *       - You have custom email templates
+ *       - You want to control email timing
+ *       - You need custom notification logic
+ *       - You're integrating with your own email system
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               document:
+ *                 type: string
+ *                 format: binary
+ *                 description: 📄 Document file to upload (PDF, DOCX, DOC)
+ *               data:
+ *                 type: string
+ *                 format: binary
+ *                 description: 📄 JSON file with template data and recipient info
+ *               signingFlow:
+ *                 type: string
+ *                 enum: [SEQUENTIAL, PARALLEL]
+ *                 default: SEQUENTIAL
+ *                 description: 📋 Signing flow type
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               documentUrl:
+ *                 type: string
+ *                 format: uri
+ *                 description: URL to document (for Method 2)
+ *                 example: https://docs.google.com/document/d/1oC0q7y8_FbJmckQiU73lun4W5k1E4qmz/edit
+ *               jsonData:
+ *                 type: object
+ *                 description: Template data with recipients
+ *                 properties:
+ *                   recipients:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         name: { type: string }
+ *                         email: { type: string, format: email }
+ *                         title: { type: string }
+ *                   agreementDate: { type: string }
+ *                   clientName: { type: string }
+ *                   companyName: { type: string }
+ *                 additionalProperties: true
+ *               signingFlow:
+ *                 type: string
+ *                 enum: [SEQUENTIAL, PARALLEL]
+ *                 default: SEQUENTIAL
+ *     responses:
+ *       201:
+ *         description: Document uploaded and signing URLs generated (no emails sent)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/UploadForUrlsResponse'
+ *       400:
+ *         description: Bad request - Invalid file or template data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized - Invalid API key
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+// Upload document and get signing URLs without sending emails
+router.post('/upload-for-urls', 
+  requirePermissions(['documents:write', 'admin:all']),
+  requireScopes(['document_management', 'full_access']),
+  uploadDocumentWithData, 
+  handleMulterErrors, 
+  documentController.uploadForSigningUrls
+);
+
 module.exports = router;
