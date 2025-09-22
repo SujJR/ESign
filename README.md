@@ -6,7 +6,9 @@ A comprehensive Node.js Express application that integrates with Adobe Sign API 
 
 ### Core Features
 - **User Authentication**: JWT-based authentication with API key support
-- **Document Management**: Upload, process, and manage documents for signing
+- **Docu## API Endpoints
+
+### Health Checknagement**: Upload, process, and manage documents for signing
 - **Adobe Sign Integration**: Full integration with Adobe Sign API for e-signatures
 - **Transaction Management**: Comprehensive transaction tracking and workflow management
 - **Multi-format Support**: Supports PDF, DOCX, and other document formats
@@ -156,6 +158,117 @@ npm start
 ### Generate API Keys
 ```bash
 npm run generate-keys
+```
+
+## Testing
+
+### Test Suites and Commands
+
+The application includes comprehensive test suites using Jest for unit, integration, and coverage testing.
+
+#### Available Test Commands
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode (for development)
+npm run test:watch
+
+# Run all tests with coverage report
+npm run test:coverage
+
+# Run specific test suites
+npm run test:pdf           # PDF upload functionality tests
+npm run test:upload        # Upload middleware tests
+npm run test:model         # Document model tests
+npm run test:integration   # Integration tests
+npm run test:all           # All tests with verbose output
+
+# Get testing help and available commands
+npm run test:help
+```
+
+#### Test Structure
+
+```
+tests/
+├── api-utils.test.js           # API utility function tests
+├── document-model.test.js      # Document model validation tests
+├── pdf-upload-integration.test.js  # PDF upload integration tests
+├── upload-coverage.test.js     # Upload coverage tests
+├── upload-focused.test.js      # Focused upload tests
+├── upload-middleware.test.js   # Upload middleware tests
+├── setup.js                    # Test setup and configuration
+├── config.js                   # Test configuration
+├── fixtures/                   # Test files and sample data
+└── helpers/                    # Test helper functions
+```
+
+#### Coverage Reports
+
+Test coverage reports are generated in the `coverage/` directory and include:
+- HTML reports: `coverage/index.html`
+- LCOV reports: `coverage/lcov.info`
+- Console output with coverage percentages
+
+```bash
+# Generate and view coverage report
+npm run test:coverage
+open coverage/index.html  # macOS
+```
+
+### Testing with Swagger UI (Recommended)
+
+1. **Start the server:**
+   ```bash
+   npm run dev
+   ```
+
+2. **Open Swagger UI:**
+   - Navigate to: http://localhost:3000/api-docs
+   - Comprehensive API documentation with interactive testing
+
+3. **Authenticate:**
+   - Generate API key: `npm run generate-keys`
+   - Click "Authorize" in Swagger UI
+   - Enter API key: `your_api_key_here`
+
+4. **Test Endpoints:**
+   - Use the interactive interface to test all endpoints
+   - View request/response examples
+   - Test different parameter combinations
+
+### Testing with Postman
+
+1. **Import Collection:**
+   ```bash
+   # Import the provided Postman collection
+   # File: final-postman-collection.json
+   ```
+
+2. **Configure Variables:**
+   - `baseUrl`: http://localhost:3000
+   - `apiKey`: your_generated_api_key
+   - `transactionId`: (set after creating transactions)
+
+3. **Available Test Collections:**
+   - Authentication & API Key Management
+   - Document Upload and Management
+   - Transaction CRUD Operations
+   - Webhook Testing
+   - Bulk Operations
+   - Analytics and Reporting
+
+### Debugging Tests
+
+#### Verbose Test Output
+```bash
+# Run tests with detailed output
+npm run test:all
+
+# Debug specific test file
+npx jest tests/pdf-upload-integration.test.js --verbose --detectOpenHandles
 ```
 
 ## API Endpoints
@@ -509,25 +622,6 @@ curl -X POST http://localhost:3000/api/transactions/bulk-delete \
 - `reviewer` - Person who needs to review the document
 - `approver` - Person who needs to approve the document
 - `observer` - Person who should be notified of progress
-
-## Testing with Postman
-
-1. **Import Collection**: Import `final-postman-collection.json` into Postman
-2. **Set Variables**: Configure `baseUrl`, `apiKey`, and `transactionId` in collection variables
-3. **Run Health Checks**: Test both server and Adobe Sign health endpoints
-4. **Upload Document**: Use the unified upload endpoint with your preferred method
-5. **Create Transaction**: Create a new transaction to track document workflow
-6. **Monitor Progress**: Check status and send reminders as needed
-7. **Analytics**: View transaction analytics and performance metrics
-
-### Available Collections
-
-The Postman collection includes comprehensive test suites for:
-- **Authentication**: API key validation and management
-- **Document Management**: Upload, status checking, and download
-- **Transaction Management**: Full CRUD operations and analytics
-- **Webhook Testing**: Adobe Sign webhook integration
-- **Bulk Operations**: Multiple document and transaction handling
 
 ## Key Features
 
