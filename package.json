@@ -3,7 +3,15 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:pdf": "jest tests/pdf-upload-integration.test.js --verbose",
+    "test:upload": "jest tests/upload-middleware.test.js --verbose",
+    "test:model": "jest tests/document-model.test.js --verbose",
+    "test:all": "jest tests/ --verbose",
+    "test:integration": "jest tests/pdf-upload-integration.test.js --verbose",
+    "test:help": "node test-runner.js",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "generate-keys": "node generate-api-keys.js",
@@ -48,6 +56,30 @@
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
-    "glob": "^11.0.3"
+    "glob": "^11.0.3",
+    "jest": "^29.7.0",
+    "mongodb-memory-server": "^10.2.1",
+    "pdfkit": "^0.17.2",
+    "supertest": "^7.1.4"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "setupFilesAfterEnv": [
+      "<rootDir>/tests/setup.js"
+    ],
+    "testMatch": [
+      "<rootDir>/tests/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/server.js",
+      "!src/config/db.js"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "html"
+    ]
   }
 }
